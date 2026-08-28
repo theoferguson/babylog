@@ -1,0 +1,229 @@
+from django.db import transaction
+from django.utils.dateparse import parse_datetime
+from rest_framework import status, viewsets
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from .importers.huckleberry import parse as parse_huckleberry
+from .models import Baby, Event, Household
+from .serializers import (BabySerializer, EventSerializer, HouseholdSerializer,
+                          validate_payload)
+
+MAX_IMPORT_BYTES = 5 * 1024 * 1024
+
+
+def current_household(request):
+    hh = Household.objects.filter(membership__user=request.user).first()
+    if hh is None:
+        raise NotFound("user belongs to no household")
+    return hh
+
+
+class HouseholdViewSet(viewsets.ModelViewSet):
+    serializer_class = HouseholdSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Household.objects.filter(membership__user=self.request.user).distinct()
+
+
+class BabyViewSet(viewsets.ModelViewSet):
+    serializer_class = BabySerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Baby.objects.filter(household__membership__user=self.request.user)
+
+    def perform_create(self, serializer):
+        serializer.save(household=current_household(self.request))
+
+
+class EventViewSet(viewsets.ModelViewSet):
+    serializer_class = EventSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(),
+                "household": current_household(self.request)}
+
+    def get_queryset(self):
+        qs = Event.objects.for_user(self.request.user).live()
+        p = self.request.query_params
+        if baby := p.get("baby"):
+            qs = qs.filter(baby=baby)
+        if kind := p.get("type"):
+            qs = qs.filter(type__in=kind.split(","))
+        # `since`/`until` are instants; the client sends them derived from the
+        # local day it is showing, so travel across zones stays correct.
+        if since := p.get("since"):
+            qs = qs.filter(started_at__gte=parse_datetime(since))
+        if until := p.get("until"):
+            qs = qs.filter(started_at__lt=parse_datetime(until))
+        return qs.select_related("baby")
+
+    def perform_create(self, serializer):
+        serializer.save(household=current_household(self.request),
+                        created_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        from django.utils import timezone
+        instance.deleted_at = timezone.now()  # soft delete, so sync propagates it
+        instance.save(update_fields=["deleted_at", "updated_at"])
+
+    @action(detail=False, methods=["get"])
+    def latest(self, request):
+        """One row per type -- powers the home screen's 'last feed 2h ago'."""
+        out = {}
+        qs = self.get_queryset()
+        for kind in Event.TYPES:
+            ev = qs.filter(type=kind).order_by("-started_at").first()
+            if ev:
+                out[kind] = EventSerializer(ev, context=self.get_serializer_context()).data
+        return Response(out)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def import_preview(request):
+    """Parse an uploaded export and return the rows WITHOUT saving anything.
+
+    The client shows these for review and edit, then posts the (possibly
+    corrected) rows to import_commit. Nothing is staged server-side: the parse is
+    deterministic and cheap, so re-uploading is the recovery path.
+    """
+    upload = request.FILES.get("file")
+    if not upload:
+        raise ValidationError("no file uploaded (field name: 'file')")
+    if upload.size > MAX_IMPORT_BYTES:
+        raise ValidationError(f"file too large (max {MAX_IMPORT_BYTES // 1024 // 1024}MB)")
+
+    tz = request.data.get("tz") or current_household(request).timezone
+    try:
+        rows = parse_huckleberry(upload.temporary_file_path()
+                                 if hasattr(upload, "temporary_file_path")
+                                 else _spool(upload), tz=tz)
+    except (ValueError, KeyError, UnicodeDecodeError) as e:
+        raise ValidationError(f"could not parse export: {e}")
+
+    existing = set(
+        Event.objects.for_user(request.user)
+        .filter(id__in=[r["id"] for r in rows])
+        .values_list("id", flat=True)
+    )
+    out = []
+    for r in rows:
+        row = {
+            "id": str(r["id"]),
+            "type": r["type"],
+            "started_at": r["started_at"].isoformat(),
+            "ended_at": r["ended_at"].isoformat() if r["ended_at"] else None,
+            "tz": r["tz"],
+            "payload": r["payload"],
+            "notes": r["notes"],
+            # Flags the review UI surfaces per row.
+            "already_imported": r["id"] in existing,
+            "needs_baby": r["type"] != Event.PUMP,
+        }
+        # Validated here, at preview, so the review list can show red warnings
+        # before anything is committed.
+        row["errors"] = row_errors(row)
+        out.append(row)
+    counts = {}
+    for r in out:
+        counts[r["type"]] = counts.get(r["type"], 0) + 1
+    return Response({"count": len(out), "counts": counts,
+                     "already_imported": len(existing),
+                     "invalid": sum(1 for r in out if r["errors"]),
+                     "tz": tz, "events": out})
+
+
+def row_errors(row):
+    """Everything wrong with one import row, as plain strings for the UI.
+
+    Baby assignment is not checked here -- the baby is chosen at commit time,
+    not at preview.
+    """
+    errors = []
+    kind = row.get("type")
+    if kind not in Event.TYPES:
+        return [f"unknown event type {kind!r}"]
+    try:
+        validate_payload(kind, row.get("payload") or {})
+    except ValidationError as e:
+        errors.extend(str(d) for d in (e.detail if isinstance(e.detail, list) else [e.detail]))
+    started = parse_datetime(row["started_at"]) if row.get("started_at") else None
+    ended = parse_datetime(row["ended_at"]) if row.get("ended_at") else None
+    if started is None:
+        errors.append("missing or unparseable started_at")
+    if row.get("ended_at") and ended is None:
+        errors.append("unparseable ended_at")
+    if started and ended and ended < started:
+        errors.append("ends before it starts")
+    return errors
+
+
+def _spool(upload):
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
+    for chunk in upload.chunks():
+        tmp.write(chunk)
+    tmp.close()
+    return tmp.name
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def import_commit(request):
+    """Save the rows the user kept selected.
+
+    Per-row, not all-or-nothing: a bad row is skipped and reported by index, the
+    rest still land. The response says exactly what saved and what didn't, and
+    ids are content-derived, so re-previewing shows the true state and
+    re-committing updates in place instead of duplicating.
+    """
+    household = current_household(request)
+    events = request.data.get("events")
+    if not isinstance(events, list) or not events:
+        raise ValidationError("expected a non-empty 'events' list")
+
+    baby = None
+    if baby_id := request.data.get("baby"):
+        baby = Baby.objects.filter(household=household, pk=baby_id).first()
+        if baby is None:
+            raise ValidationError("unknown baby for this household")
+
+    to_save, skipped = [], []
+    for i, row in enumerate(events):
+        errors = row_errors(row)
+        kind = row.get("type")
+        row_baby = None if kind == Event.PUMP else baby
+        if row_baby is None and kind != Event.PUMP:
+            errors.append(f"{kind} needs a baby -- choose one before importing")
+        if errors:
+            skipped.append({"index": i, "id": row.get("id"), "errors": errors})
+            continue
+        to_save.append(Event(
+            id=row["id"], household=household, baby=row_baby, type=kind,
+            started_at=parse_datetime(row["started_at"]),
+            ended_at=parse_datetime(row["ended_at"]) if row.get("ended_at") else None,
+            tz=row.get("tz") or household.timezone,
+            payload=row.get("payload") or {}, notes=row.get("notes") or "",
+            created_by=request.user,
+        ))
+
+    if to_save:
+        # Atomic over the rows that do save, so a DB error can't half-write them.
+        with transaction.atomic():
+            Event.objects.bulk_create(
+                to_save,
+                update_conflicts=True,
+                update_fields=["baby", "type", "started_at", "ended_at", "tz",
+                               "payload", "notes"],
+                unique_fields=["id"],
+            )
+    return Response(
+        {"saved": len(to_save), "skipped": skipped},
+        status=status.HTTP_201_CREATED if to_save else status.HTTP_400_BAD_REQUEST,
+    )

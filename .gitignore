@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+server/dev.sqlite3
+server/staticfiles/
+.env
+.DS_Store
+
+# Real exports stay out of the repo — they're health data about a real child.
+# Tests use the synthetic fixture in server/events/testdata/ instead.
+huckleberry-export.csv
+*-export.csv

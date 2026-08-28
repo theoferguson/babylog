@@ -1,0 +1,14 @@
+"Type","Start","End","Duration","Start Condition","Start Location","End Condition","Notes"
+"Feed","2020-01-01 08:00","2020-01-01 08:22","00:22","00:13R","Breast","00:08L",
+"Feed","2020-01-01 11:00","2020-01-01 11:10","00:10","00:10R","Breast",,
+"Feed","2020-01-01 14:00","2020-01-01 14:09","00:09",,"Breast","00:09L",
+"Feed","2020-01-01 17:30",,,"Breast Milk","Bottle","3.5oz",
+"Diaper","2020-01-01 09:15",,,,,"Pee:small",
+"Diaper","2020-01-01 12:20",,"yellow","Runny",,"Poo:medium",
+"Diaper","2020-01-01 15:45",,"brown","Loose",,"Both, pee:medium poo:large",
+"Diaper","2020-01-02 10:55",,,,,"Pee:small",
+"Diaper","2020-01-02 10:55",,"yellow","Runny",,"Poo:small",
+"Diaper","2020-01-02 13:00",,,,,"Pee:medium","Synthetic note"
+"Pump","2020-01-01 10:00",,,"2oz",,"1.5oz",
+"Pump","2020-01-01 22:00",,,"0.75oz",,,
+"Pump","2020-01-02 11:15","2020-01-02 11:45","00:30","1oz",,"2oz",
