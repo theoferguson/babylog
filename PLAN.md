@@ -552,7 +552,7 @@ the draft and re-uploading is the recovery path.
 Ids are derived from row content, so **both paths are idempotent** — the CLI
 command and the API commit can run twice with no duplicates.
 
-### Phase 2 — Log + day view  🚧 **in progress**
+### Phase 2 — Log + day view  ✅ **built**
 Expo app. Auth screen, baby switcher, the logging forms for the types you
 actually use — **feed, diaper, pump** — and the **day timeline**. Ship to
 TestFlight and to the web build.
@@ -656,7 +656,7 @@ and keeps the record.
 through the review screen, you log a real day on it, and you'd rather open it
 than Huckleberry.
 
-### Phase 3 — Calendar navigation + edit  🚧 **mostly built**
+### Phase 3 — Calendar navigation + edit  ✅ **built**
 Move between days and see patterns across them:
 - **Week strip** above the timeline — tap to jump, density per day. **Built**,
   with prev/next arrows and a Today/Yesterday label.
@@ -796,14 +796,14 @@ When sleep data exists: rolling median wake window from that baby's own last N
 days, bucketed by age. Ship the boring version, measure it against reality for
 two weeks, and only then consider anything smarter.
 
-### Phase 7 — Reminders
+### Phase 7 — Reminders *(blocked on Phase 6)*
 `expo-notifications`, **locally scheduled** off the Phase 6 prediction. No push
 server, no FCM, no APNs certificates. Add real push only when you need to notify
 *the other parent* about *your* action — which is a different feature.
 
 ---
 
-### Phase 8 — iOS widgets and Live Activities
+### Phase 8 — iOS widgets and Live Activities *(next big one)*
 
 Two widgets, both about not opening the app:
 
@@ -899,6 +899,46 @@ timer, and the Live Activity is live on the device that owns the session.
   have data.
 - **iOS widgets + Live Activities** are Phase 8 — native WidgetKit work, App
   Group for data, `Text(style: .timer)` for ticking, App Intents for buttons.
+
+## Where this stands — 2026-08-29
+
+**Shipped and in daily use.** Both phones on TestFlight, both parents with
+accounts, 225 events imported, web app at babylog-app.fly.dev as a fallback.
+Phases 1–5 done. 76 Django tests, 6 node suites.
+
+**Two release paths, and they are separate.** `fly deploy` ships the web app and
+the API; `eas update --branch production --environment production` ships the JS
+to the phones. Forgetting the second is why a change can be live on the web and
+absent on a phone. Native changes (new packages, icon, version) still need
+`eas build` + `eas submit`. Settings shows the running update id.
+
+### What is actually left
+
+**Worth doing when it bites, not before:**
+- **Abandoned-timer nudge.** A feed started and never saved stays `in_progress`
+  forever — it sits on `/active/`, keeps the home-screen banner up, and blocks
+  the next feed from starting fresh (the server hands back the stale one). The
+  fix is a "still nursing?" prompt past ~3h with finish-or-discard. This is the
+  one known gap that will happen on its own.
+
+**Blocked on data, correctly:**
+- **Phase 6 predictions** and **Phase 7 reminders** both need sleep history, and
+  sleep is not being logged. Sleep logging exists; nothing else can start until
+  it has been running for a few weeks.
+
+**The next real feature, when you want it:**
+- **Phase 8 — Live Activities**, before the home-screen widget. An in-progress
+  feed on the lock screen and Dynamic Island is where you would actually look at
+  3am. Native work, so it needs a real build rather than an OTA update.
+
+**Things deliberately not built**, each still the right call: month grid (the
+week strip is enough at ~22 events/day), CRDT sync (last-write-wins is fine for
+two people), dark mode (tokens are in one file, so it is a 30-minute change when
+the 3am screen blinds you), Android widgets, Apple Watch.
+
+**One piece of debt worth naming:** the import draft lives in client memory, so a
+refresh mid-review loses it and you re-upload. Fine at 224 rows; revisit only if
+you ever import something big.
 
 ## Open questions
 
