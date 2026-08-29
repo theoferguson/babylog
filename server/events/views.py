@@ -112,6 +112,20 @@ class EventViewSet(viewsets.ModelViewSet):
                 ser.is_valid(raise_exception=True)
                 ser.save()
                 return Response(ser.data)
+        # Only one feed can be in progress for a baby at a time. Two devices can
+        # ask at once -- both parents tapping Nurse, or one phone asking before
+        # its first poll has answered -- and the right response is to hand back
+        # the timer that is already running rather than fork a second one.
+        if request.data.get("in_progress") and request.data.get("type") == Event.FEED:
+            with transaction.atomic():
+                running = (
+                    Event.objects.for_user(request.user).active()
+                    .select_for_update()
+                    .filter(type=Event.FEED, baby_id=request.data.get("baby"))
+                    .first()
+                )
+                if running is not None:
+                    return Response(self.get_serializer(running).data)
         return super().create(request, *args, **kwargs)
 
     def perform_create(self, serializer):

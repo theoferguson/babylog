@@ -10,18 +10,25 @@ const INTERVAL_MS = 3000;
 export function useActiveEvents() {
   const [events, setEvents] = useState([]);
   const [skewMs, setSkewMs] = useState(0);
+  // "No timer is running" and "I have not looked yet" are different answers, and
+  // a screen that confuses them will offer to start a feed that already exists.
+  const [loaded, setLoaded] = useState(false);
   const timer = useRef(null);
 
   const poll = useCallback(async () => {
     try {
       const { events: rows, now } = await Events.active();
       setEvents(rows || []);
+      setLoaded(true);
       // Trust the server's clock for elapsed time; a phone whose clock drifts
       // would otherwise render a different duration than its partner.
       if (now) setSkewMs(new Date(now).getTime() - Date.now());
       return rows || [];
     } catch {
-      return null; // offline: keep showing the last known state
+      // Offline: keep showing the last known state, but stop blocking the UI --
+      // a local timer is still better than a spinner that never ends.
+      setLoaded(true);
+      return null;
     }
   }, []);
 
@@ -45,7 +52,7 @@ export function useActiveEvents() {
     };
   }, [poll]);
 
-  return { events, skewMs, refresh: poll, setEvents };
+  return { events, skewMs, loaded, refresh: poll, setEvents };
 }
 
 // A ticking clock that re-renders once a second, used only while something runs.

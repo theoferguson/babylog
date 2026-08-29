@@ -45,7 +45,7 @@ function fromEvent(event) {
 export default function Nurse() {
   const router = useRouter();
   const { babyId } = useSession();
-  const { events, skewMs, refresh } = useActiveEvents();
+  const { events, skewMs, loaded, refresh } = useActiveEvents();
   const [offlineState, setOfflineState] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -234,6 +234,10 @@ export default function Nurse() {
     ]);
   };
 
+  // Until the first poll answers we do not know whether a feed is already
+  // running, and tapping a side would start a second one.
+  const checking = !loaded && !offlineState;
+
   const secs = (side) => (view ? local.secsFor(view, side, now) : 0);
   const totalSecs = secs('R') + secs('L');
 
@@ -252,7 +256,9 @@ export default function Nurse() {
     <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
       <Text style={[s.h1, { textAlign: 'center' }]}>{clock(totalSecs)}</Text>
       <Text style={[s.muted, { textAlign: 'center' }]}>
-        {!view
+        {checking
+          ? 'Checking for a running feed…'
+          : !view
           ? 'Tap a side to start'
           : view.running_side
             ? `${view.running_side} side running`
@@ -272,7 +278,7 @@ export default function Nurse() {
             side={side}
             secs={secs(side)}
             running={view?.running_side === side}
-            disabled={busy}
+            disabled={busy || checking}
             onPress={() => tapSide(side)}
           />
         ))}

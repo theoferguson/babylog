@@ -633,6 +633,18 @@ add up to more time than the feed itself lasted.** That was reachable two ways
 before — dragging the start time forward on a running timer, and typing minutes
 by hand in the event editor, which had no check at all. Both are now 400s.
 
+**Opening the nurse screen never forks a second feed.** The screen mounts its own
+poll, so for a moment it cannot tell "no timer is running" from "I have not asked
+yet" — and tapping a side in that window used to create a *second* in-progress
+feed. Two fixes, because either alone leaves a hole:
+
+- the client distinguishes the two states (`loaded`) and disables the side
+  buttons while it is still checking
+- the server refuses to fork: starting a feed for a baby who already has one
+  running returns **the running feed** instead of a new one, so a second device
+  joins it. That also covers both parents tapping Nurse at the same moment,
+  which no amount of client-side care can prevent.
+
 **Still to build:** the abandoned-timer nudge.
 
 **A safeguard added with settings:** `Event.baby` cascades, so deleting a baby

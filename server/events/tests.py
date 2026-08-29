@@ -818,3 +818,56 @@ class RunningFeedEditTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["notes"], "fussy")
         self.assertEqual(r.json()["payload"]["running_side"], "R")
+
+
+class SingleRunningFeedTests(APITestCase):
+    """Starting a feed while one is already running joins it, never forks it."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-single")
+        self.partner = User.objects.create_user("partner2", password="pw-for-tests-only")
+        Membership.objects.create(user=self.partner, household=self.hh)
+        self.client.force_authenticate(self.user)
+
+    def start(self):
+        return self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": timezone.now().isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json")
+
+    def test_a_second_start_returns_the_running_feed(self):
+        first = self.start()
+        self.assertEqual(first.status_code, 201)
+        second = self.start()
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["id"], first.json()["id"])
+        self.assertEqual(Event.objects.filter(type="feed").count(), 1)
+
+    def test_the_partner_joins_the_same_timer_rather_than_starting_another(self):
+        first = self.start()
+        self.client.force_authenticate(self.partner)
+        second = self.start()
+        self.assertEqual(second.json()["id"], first.json()["id"])
+        self.assertEqual(self.client.get("/api/events/active/").json()["events"].__len__(), 1)
+
+    def test_a_new_feed_can_start_once_the_previous_one_is_finished(self):
+        first = self.start()
+        self.client.post(f"/api/events/{first.json()['id']}/finish/", {}, format="json")
+        second = self.start()
+        self.assertEqual(second.status_code, 201)
+        self.assertNotEqual(second.json()["id"], first.json()["id"])
+
+    def test_a_discarded_feed_does_not_block_the_next_one(self):
+        first = self.start()
+        self.client.delete(f"/api/events/{first.json()['id']}/")
+        self.assertEqual(self.start().status_code, 201)
+
+    def test_another_baby_can_nurse_at_the_same_time(self):
+        twin = Baby.objects.create(household=self.hh, name="Twin")
+        self.start()
+        r = self.client.post("/api/events/", {
+            "baby": str(twin.pk), "type": "feed",
+            "started_at": timezone.now().isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(len(self.client.get("/api/events/active/").json()["events"]), 2)
