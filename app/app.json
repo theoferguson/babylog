@@ -48,6 +48,12 @@
         "projectId": "c3ffeff3-e9c3-465c-b892-a039823c13e5"
       }
     },
-    "owner": "ferguson-dev"
+    "owner": "ferguson-dev",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/c3ffeff3-e9c3-465c-b892-a039823c13e5"
+    }
   }
 }
