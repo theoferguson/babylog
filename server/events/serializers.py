@@ -102,6 +102,11 @@ class HouseholdSerializer(serializers.ModelSerializer):
 
 class EventSerializer(serializers.ModelSerializer):
     duration_sec = serializers.ReadOnlyField()
+    # Declared explicitly because the model field is editable=False, which would
+    # otherwise make DRF read-only it and silently discard the client's id. The
+    # offline outbox depends on the client choosing the id: that is what makes a
+    # replayed write an upsert instead of a duplicate.
+    id = serializers.UUIDField(required=False)
 
     class Meta:
         model = Event

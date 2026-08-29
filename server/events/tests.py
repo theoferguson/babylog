@@ -410,3 +410,106 @@ class WebBuildTests(TestCase):
     def test_missing_build_does_not_500(self):
         with self.settings(WEB_ROOT=Path("/nonexistent")):
             self.assertEqual(self.client.get("/").status_code, 404)
+
+
+class OfflineNursingTests(APITestCase):
+    """Two offline shapes: replayed timer intents, and a whole feed created after."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-offline")
+        self.client.force_authenticate(self.user)
+        self.t0 = timezone.now() - timedelta(minutes=40)
+
+    def test_intents_queued_offline_replay_to_the_same_totals(self):
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json")
+        ev = r.json()["id"]
+
+        # The phone went offline after the first tap. These three all flush later,
+        # in order, carrying the times the buttons were actually pressed.
+        for body in [
+            {"action": "start", "side": "R", "at": self.t0.isoformat()},
+            {"action": "start", "side": "L",
+             "at": (self.t0 + timedelta(minutes=13)).isoformat()},
+            {"action": "stop", "at": (self.t0 + timedelta(minutes=21)).isoformat()},
+        ]:
+            self.assertEqual(
+                self.client.post(f"/api/events/{ev}/timer/", body, format="json").status_code,
+                200,
+            )
+        p = self.client.get(f"/api/events/{ev}/").json()["payload"]
+        # Identical to what an online session would have produced.
+        self.assertEqual(p["right_sec"], 13 * 60)
+        self.assertEqual(p["left_sec"], 8 * 60)
+
+    def test_queued_finish_uses_the_tap_time_not_the_flush_time(self):
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json")
+        ev = r.json()["id"]
+        self.client.post(f"/api/events/{ev}/timer/",
+                         {"action": "start", "side": "L", "at": self.t0.isoformat()},
+                         format="json")
+        end = self.t0 + timedelta(minutes=18)
+        r = self.client.post(f"/api/events/{ev}/finish/", {"at": end.isoformat()},
+                             format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["payload"]["left_sec"], 18 * 60)
+        # 18 minutes, not the 40 that have elapsed since the feed began.
+        self.assertEqual(r.json()["duration_sec"], 18 * 60)
+
+    def test_a_whole_feed_created_offline_is_accepted(self):
+        # No event ever reached the server; the app queues the finished feed.
+        body = {
+            "id": "9f2b1c44-1111-4000-8000-000000000001",
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(),
+            "ended_at": (self.t0 + timedelta(minutes=25)).isoformat(),
+            "tz": "America/New_York", "in_progress": False, "notes": "logged offline",
+            "payload": {"method": "breast", "right_sec": 1020, "left_sec": 480,
+                        "last_side": "R"},
+        }
+        r = self.client.post("/api/events/", body, format="json")
+        self.assertEqual(r.status_code, 201, r.json())
+        self.assertEqual(r.json()["duration_sec"], 25 * 60)
+        self.assertFalse(r.json()["in_progress"])
+        self.assertEqual(self.client.get("/api/events/active/").json()["events"], [])
+
+        # The client chose the id, so flushing the same queued write twice
+        # upserts instead of creating a second feed.
+        self.assertEqual(r.json()["id"], body["id"])
+        again = self.client.post("/api/events/", body, format="json")
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(Event.objects.filter(type="feed").count(), 1)
+
+    def test_a_replayed_create_cannot_hijack_another_household(self):
+        other, other_hh, other_baby = make_household("offline-outsider")
+        r = self.client.post("/api/events/", {
+            "id": "9f2b1c44-1111-4000-8000-000000000002",
+            "baby": str(self.baby.pk), "type": "diaper",
+            "started_at": self.t0.isoformat(), "payload": {"pee": "small"}}, format="json")
+        self.assertEqual(r.status_code, 201)
+        self.client.force_authenticate(other)
+        r2 = self.client.post("/api/events/", {
+            "id": "9f2b1c44-1111-4000-8000-000000000002",
+            "baby": str(other_baby.pk), "type": "diaper",
+            "started_at": self.t0.isoformat(), "payload": {"pee": "large"}}, format="json")
+        self.assertEqual(r2.status_code, 400)
+        self.assertEqual(Event.objects.get(pk="9f2b1c44-1111-4000-8000-000000000002")
+                         .payload["pee"], "small")
+
+    def test_a_replayed_create_does_not_resurrect_a_deleted_event(self):
+        body = {
+            "id": "9f2b1c44-1111-4000-8000-000000000003",
+            "baby": str(self.baby.pk), "type": "diaper",
+            "started_at": self.t0.isoformat(), "payload": {"pee": "small"},
+        }
+        self.client.post("/api/events/", body, format="json")
+        self.client.delete(f"/api/events/{body['id']}/")
+        again = self.client.post("/api/events/", body, format="json")
+        self.assertEqual(again.status_code, 200)
+        self.assertIsNotNone(Event.objects.get(pk=body["id"]).deleted_at)
+        self.assertEqual(self.client.get("/api/events/").json()["count"], 0)

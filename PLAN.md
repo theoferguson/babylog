@@ -642,10 +642,28 @@ every later write behind it. Those are dropped and counted. Tested in
 is dropped without blocking the rest, and a mid-flush disconnect keeps the
 remainder queued in order.
 
-**Not built:** offline *nursing*. Timer intents are meaningless without the
-server, so starting a feed offline currently just shows the error. The fix is a
-local timer that enqueues one complete event on Save — bounded work, but it
-means a feed started offline is not shared even after reconnecting.
+**Offline nursing is built**, and it turned out to be two cases, not one:
+
+1. **A feed is already running on the server and the connection drops.** Timer
+   intents carry their own `at`, so they queue and replay in order and the server
+   still computes the right totals — a queued `finish` uses the moment you tapped,
+   not the moment it flushed. The screen shadows the arithmetic locally just to
+   keep ticking.
+2. **No feed exists and one cannot be created.** The timer runs purely on the
+   device (`src/localTimer.js`, same accumulator rules as the server, persisted on
+   every tap so a dead battery loses nothing) and is queued as one complete event
+   on Save.
+
+A feed that goes local **stays local until saved**, even if the connection returns
+mid-feed. Promoting it halfway would mean reconciling against a partner who may
+have been tapping too. The cost: a feed started offline is not shared live.
+
+**A bug this surfaced:** `Event.id` is `editable=False`, so DRF was silently
+marking it read-only and *discarding* client-supplied ids. Every claim about the
+outbox being idempotent was false — a double flush would have created duplicates.
+`id` is now explicitly writable and create is idempotent: replaying a queued write
+upserts, a replay against another household is rejected, and a replay of an event
+deleted in the meantime does not resurrect it.
 
 **Skipped:** CRDTs, a sync engine, NetInfo. Offline is inferred from request
 failure, which is the only thing that actually matters — can I reach the API.

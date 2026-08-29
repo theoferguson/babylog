@@ -66,6 +66,24 @@ class EventViewSet(viewsets.ModelViewSet):
             qs = qs.filter(started_at__lt=parse_datetime(until))
         return qs.select_related("baby")
 
+    def create(self, request, *args, **kwargs):
+        """Idempotent create, so a queued offline write can flush twice safely."""
+        given = request.data.get("id")
+        if given:
+            existing = Event.objects.filter(pk=given).first()
+            if existing is not None:
+                if not Event.objects.for_user(request.user).filter(pk=given).exists():
+                    raise ValidationError("that id belongs to another household")
+                if existing.deleted_at:
+                    # Deleted after the write was queued; the delete wins rather
+                    # than the event coming back from the dead.
+                    return Response(self.get_serializer(existing).data)
+                ser = self.get_serializer(existing, data=request.data, partial=True)
+                ser.is_valid(raise_exception=True)
+                ser.save()
+                return Response(ser.data)
+        return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         serializer.save(household=current_household(self.request),
                         created_by=self.request.user)
