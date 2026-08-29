@@ -740,3 +740,81 @@ class InviteTests(APITestCase):
         body = self.make_invite()
         self.assertEqual(self.client.delete(f"/api/invites/{body['id']}/").status_code, 204)
         self.assertEqual(self.register(code=self.code_of(body)).status_code, 400)
+
+
+class RunningFeedEditTests(APITestCase):
+    """A feed can be corrected while it is still running or paused."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-running")
+        self.client.force_authenticate(self.user)
+        self.t0 = timezone.now() - timedelta(minutes=30)
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json")
+        self.ev = r.json()["id"]
+
+    def tick(self, action, side=None, at=None):
+        body = {"action": action}
+        if side:
+            body["side"] = side
+        if at:
+            body["at"] = at.isoformat()
+        return self.client.post(f"/api/events/{self.ev}/timer/", body, format="json")
+
+    def test_start_time_can_be_moved_while_running(self):
+        self.tick("start", "R", self.t0)
+        earlier = (self.t0 - timedelta(minutes=10)).isoformat()
+        r = self.client.patch(f"/api/events/{self.ev}/", {"started_at": earlier},
+                              format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertTrue(r.json()["in_progress"])
+        # The clock keeps running: the side is untouched by the correction.
+        self.assertEqual(r.json()["payload"]["running_side"], "R")
+
+    def test_start_time_can_be_moved_while_paused(self):
+        self.tick("start", "L", self.t0)
+        self.tick("stop", at=self.t0 + timedelta(minutes=12))
+        earlier = (self.t0 - timedelta(minutes=5)).isoformat()
+        r = self.client.patch(f"/api/events/{self.ev}/", {"started_at": earlier},
+                              format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["payload"]["left_sec"], 12 * 60)
+
+    def test_start_time_cannot_be_dragged_past_the_time_already_recorded(self):
+        self.tick("start", "R", self.t0)
+        self.tick("stop", at=self.t0 + timedelta(minutes=25))
+        # 25 minutes are banked; a start time two minutes ago cannot contain them.
+        too_late = (timezone.now() - timedelta(minutes=2)).isoformat()
+        r = self.client.patch(f"/api/events/{self.ev}/", {"started_at": too_late},
+                              format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("sides", str(r.json()).lower())
+
+    def test_start_time_cannot_be_in_the_future(self):
+        soon = (timezone.now() + timedelta(hours=1)).isoformat()
+        r = self.client.patch(f"/api/events/{self.ev}/", {"started_at": soon},
+                              format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_editor_cannot_type_more_side_minutes_than_the_feed_lasted(self):
+        self.tick("start", "R", self.t0)
+        r = self.client.post(f"/api/events/{self.ev}/finish/",
+                             {"at": (self.t0 + timedelta(minutes=20)).isoformat()},
+                             format="json")
+        self.assertEqual(r.status_code, 200)
+        # A 20-minute feed cannot have 45 minutes of nursing in it.
+        bad = self.client.patch(f"/api/events/{self.ev}/", {
+            "payload": {"method": "breast", "right_sec": 45 * 60}}, format="json")
+        self.assertEqual(bad.status_code, 400)
+        ok = self.client.patch(f"/api/events/{self.ev}/", {
+            "payload": {"method": "breast", "right_sec": 18 * 60}}, format="json")
+        self.assertEqual(ok.status_code, 200, ok.json())
+
+    def test_notes_can_be_edited_while_running(self):
+        self.tick("start", "R", self.t0)
+        r = self.client.patch(f"/api/events/{self.ev}/", {"notes": "fussy"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["notes"], "fussy")
+        self.assertEqual(r.json()["payload"]["running_side"], "R")

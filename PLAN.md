@@ -623,6 +623,16 @@ Gmail. No dependency, no provider lock-in: any SMTP host works by overriding
 dropped. A send failure never loses the invite — the response says
 `email_sent: false` and the UI offers the link to pass on by hand.
 
+**A running feed is editable before it is saved.** The nurse screen shows
+"Started 3:14pm — tap to adjust" and opens a date/time field; notes are editable
+too. Both work whether the timer is running or paused, because the side
+accumulators are independent of `started_at`.
+
+The server enforces the invariant that makes this safe: **nursing sides can never
+add up to more time than the feed itself lasted.** That was reachable two ways
+before — dragging the start time forward on a running timer, and typing minutes
+by hand in the event editor, which had no check at all. Both are now 400s.
+
 **Still to build:** the abandoned-timer nudge.
 
 **A safeguard added with settings:** `Event.baby` cascades, so deleting a baby

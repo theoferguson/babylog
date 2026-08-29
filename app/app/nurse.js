@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Events, deviceTz } from '../src/api';
+import DateTimeField from '../src/DateTimeField';
 import { clock } from '../src/format';
 import * as local from '../src/localTimer';
 import OfflineBar from '../src/OfflineBar';
@@ -50,6 +51,7 @@ export default function Nurse() {
   const [error, setError] = useState(null);
   const [notes, setNotes] = useState('');
   const [notesDirty, setNotesDirty] = useState(false);
+  const [editStart, setEditStart] = useState(false);
 
   const remote = events.find((e) => e.type === 'feed') || null;
 
@@ -235,6 +237,17 @@ export default function Nurse() {
   const secs = (side) => (view ? local.secsFor(view, side, now) : 0);
   const totalSecs = secs('R') + secs('L');
 
+  // Correcting the start time works whether the timer is running or paused --
+  // the side accumulators are independent of it, so nothing is lost either way.
+  const changeStart = (next) =>
+    guard(async () => {
+      if (offlineState) {
+        await goLocal({ ...offlineState, started_at: next.toISOString() });
+        return;
+      }
+      await Events.update(event.id, { started_at: next.toISOString() });
+    });
+
   return (
     <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
       <Text style={[s.h1, { textAlign: 'center' }]}>{clock(totalSecs)}</Text>
@@ -273,6 +286,22 @@ export default function Nurse() {
 
       {view ? (
         <>
+          <Pressable
+            onPress={() => setEditStart((v) => !v)}
+            accessibilityRole="button"
+            style={{ alignItems: 'center', paddingVertical: 4 }}
+          >
+            <Text style={s.muted}>
+              Started {new Date(view.started_at).toLocaleTimeString([], {
+                hour: 'numeric', minute: '2-digit',
+              })}
+              {editStart ? '' : ' — tap to adjust'}
+            </Text>
+          </Pressable>
+          {editStart ? (
+            <DateTimeField value={new Date(view.started_at)} onChange={changeStart} />
+          ) : null}
+
           <TextInput
             style={[s.input, { minHeight: 64, textAlignVertical: 'top' }]}
             placeholder="Notes (optional)"
