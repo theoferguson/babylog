@@ -1,14 +1,17 @@
 import { Pressable, Text, View } from 'react-native';
-import { styleFor, c } from './theme';
+import { hourOffset } from './days';
 import { summarize, timeOfDay } from './format';
+import { c, styleFor } from './theme';
 
 const HOUR = 44; // px per hour
 const GUTTER = 44;
 
 // 24h vertical axis. Interval events (nursing, sleep) are blocks; instant events
-// (bottle, diaper, pump) are dots on the axis. Hand-rolled -- no library renders
-// this view well, and it is ~100 lines.
-export default function Timeline({ events, units, onPress }) {
+// (bottle, diaper, pump) are dots on the axis.
+//
+// Placement uses each event's OWN recorded zone, not the viewer's, so a day
+// logged in another timezone still reads correctly after you fly home.
+export default function Timeline({ events, units, tz, onPress }) {
   const rows = [...events].sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
   return (
     <View style={{ height: 24 * HOUR, marginTop: 8 }}>
@@ -17,12 +20,8 @@ export default function Timeline({ events, units, onPress }) {
           <View style={{ height: 1, backgroundColor: c.border, marginLeft: GUTTER }} />
           <Text
             style={{
-              position: 'absolute',
-              top: -7,
-              width: GUTTER - 8,
-              textAlign: 'right',
-              fontSize: 11,
-              color: c.muted,
+              position: 'absolute', top: -7, width: GUTTER - 8,
+              textAlign: 'right', fontSize: 11, color: c.muted,
             }}
           >
             {h % 12 === 0 ? 12 : h % 12}
@@ -32,10 +31,11 @@ export default function Timeline({ events, units, onPress }) {
       ))}
       {rows.map((e) => {
         const t = styleFor(e);
-        const start = new Date(e.started_at);
-        const top = (start.getHours() + start.getMinutes() / 60) * HOUR;
-        const end = e.ended_at ? new Date(e.ended_at) : null;
-        const durH = end ? (end - start) / 3600000 : 0;
+        const zone = e.tz || tz;
+        const top = hourOffset(e.started_at, zone) * HOUR;
+        const durH = e.ended_at
+          ? (new Date(e.ended_at) - new Date(e.started_at)) / 3600000
+          : 0;
         const detail = summarize(e, units);
         const interval = durH > 0 || e.in_progress;
         return (
@@ -43,12 +43,10 @@ export default function Timeline({ events, units, onPress }) {
             key={e.id}
             onPress={() => onPress?.(e)}
             accessibilityRole="button"
-            accessibilityLabel={`${t.label} at ${timeOfDay(e.started_at)}${detail ? `, ${detail}` : ''}`}
-            style={{
+            accessibilityLabel={`${t.label} at ${timeOfDay(e.started_at)}${detail ? `, ${detail}` : ''}. Tap to edit.`}
+            style={({ pressed }) => ({
               position: 'absolute',
-              top,
-              left: GUTTER + 6,
-              right: 6,
+              top, left: GUTTER + 6, right: 6,
               minHeight: 22,
               height: interval ? Math.max(22, durH * HOUR) : 22,
               backgroundColor: interval ? t.fill : 'transparent',
@@ -57,7 +55,8 @@ export default function Timeline({ events, units, onPress }) {
               borderLeftColor: t.ink,
               justifyContent: 'center',
               paddingHorizontal: 8,
-            }}
+              opacity: pressed ? 0.7 : 1,
+            })}
           >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={{ fontSize: 12 }}>{t.icon}</Text>

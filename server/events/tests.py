@@ -317,3 +317,43 @@ class CorsTests(APITestCase):
         r = self.client.options("/api/auth/token/", HTTP_ORIGIN="https://evil.example",
                                 HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST")
         self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))
+
+
+class EventDetailTests(APITestCase):
+    """The edit screen loads one event, patches it, and soft-deletes it."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-detail")
+        self.client.force_authenticate(self.user)
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "diaper",
+            "started_at": timezone.now().isoformat(),
+            "payload": {"pee": "small"}}, format="json")
+        self.ev = r.json()["id"]
+
+    def test_retrieve_then_patch_payload_and_time(self):
+        r = self.client.get(f"/api/events/{self.ev}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["payload"], {"pee": "small"})
+
+        earlier = (timezone.now() - timedelta(hours=3)).isoformat()
+        r = self.client.patch(f"/api/events/{self.ev}/", {
+            "payload": {"pee": "large", "poo": "medium"},
+            "started_at": earlier, "notes": "changed"}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["payload"]["poo"], "medium")
+        self.assertEqual(r.json()["notes"], "changed")
+
+    def test_patch_still_validates_the_payload(self):
+        r = self.client.patch(f"/api/events/{self.ev}/",
+                              {"payload": {"pee": "enormous"}}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_deleted_event_is_not_retrievable(self):
+        self.client.delete(f"/api/events/{self.ev}/")
+        self.assertEqual(self.client.get(f"/api/events/{self.ev}/").status_code, 404)
+
+    def test_another_household_cannot_retrieve_it(self):
+        other, _, _ = make_household("detail-outsider")
+        self.client.force_authenticate(other)
+        self.assertEqual(self.client.get(f"/api/events/{self.ev}/").status_code, 404)

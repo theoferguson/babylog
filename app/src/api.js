@@ -153,6 +153,7 @@ export const Events = {
     ).toString();
     return api.get(`/api/events/${q ? `?${q}` : ''}`);
   },
+  get: (id) => api.get(`/api/events/${id}/`),
   latest: () => api.get('/api/events/latest/'),
   active: () => api.get('/api/events/active/'),
   create: (e) => api.post('/api/events/', e),

@@ -592,19 +592,30 @@ event by tapping it, and the abandoned-timer nudge.
 through the review screen, you log a real day on it, and you'd rather open it
 than Huckleberry.
 
-### Phase 3 — Calendar navigation + edit
+### Phase 3 — Calendar navigation + edit  🚧 **mostly built**
 Move between days and see patterns across them:
-- **Week strip** above the timeline — tap to jump, density per day.
-- **List view** — flat reverse-chron across days, for scanning and searching.
-  Nearly free once the timeline exists; both read the same query.
+- **Week strip** above the timeline — tap to jump, density per day. **Built**,
+  with prev/next arrows and a Today/Yesterday label.
+- **List view** — reverse-chron for the selected day. **Built**, toggled from
+  the day header; shares the timeline's query.
 - **Every event on the calendar is tappable, and opens editable.** Day timeline,
   week strip and list all route to the same editor; it reuses the Phase 2 forms
   in edit mode rather than a second set of screens. Delete is a soft delete, so
   it syncs to the other phone rather than silently reappearing.
-  *(Today the timeline only responds to taps on a running timer — everything
-  else is display-only until this ships.)*
-- **Backdated entry** — logging a feed you forgot two hours ago. Needed more
-  often than it sounds.
+  **Built.** Tapping any block or list row opens `event/[id]`; a running timer
+  routes to the nurse screen instead.
+- **Backdated entry** — logging a feed you forgot two hours ago. Partly built:
+  the instant forms offer −5/−15/−30m and the editor offers ±5/15/60m. A real
+  date/time picker is still missing, so you cannot yet log against a past *day*.
+
+**Timezone correctness landed here.** Events are placed on the axis by
+`hourOffset(started_at, event.tz)` — each event's own recorded zone, not the
+viewer's — and days are bounded with `Intl`, so DST days come out 23h and 25h
+instead of a naive 24. `src/days.test.mjs` covers spring-forward, fall-back, a
+Lisbon-vs-New-York night, and leap year.
+
+**Still open in this phase:** a date picker for backdating beyond today, and
+month navigation beyond the 7-day strip.
 
 This completes the "record / edit / add" requirement.
 
