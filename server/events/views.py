@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.db import transaction
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
@@ -71,6 +74,71 @@ class EventViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
         instance.deleted_at = timezone.now()  # soft delete, so sync propagates it
         instance.save(update_fields=["deleted_at", "updated_at"])
+
+    @action(detail=False, methods=["get"])
+    def active(self, request):
+        """Every running timer in the household.
+
+        Both phones poll this while a timer is going, which is what makes a
+        feed startable on one device and stoppable on the other.
+        """
+        qs = Event.objects.for_user(request.user).active().select_related("baby")
+        ctx = self.get_serializer_context()
+        return Response({"events": EventSerializer(qs, many=True, context=ctx).data,
+                         "now": timezone.now().isoformat()})
+
+    @action(detail=True, methods=["post"])
+    def timer(self, request, pk=None):
+        """Apply one timer intent: {action: start|stop, side: L|R, at: <iso>}.
+
+        Clients send intents, never computed totals. Two phones each PATCHing
+        their own view of `right_sec` would clobber each other, and with two
+        people passing a baby back and forth that is the normal case.
+        """
+        action_name = request.data.get("action")
+        if action_name not in ("start", "stop"):
+            raise ValidationError("action must be 'start' or 'stop'")
+        side = request.data.get("side")
+        if action_name == "start" and side not in ("L", "R"):
+            raise ValidationError("starting requires side 'L' or 'R'")
+        at = _timer_instant(request.data.get("at"))
+
+        with transaction.atomic():
+            ev = self._locked_active(pk)
+            payload = dict(ev.payload or {})
+            _bank_running_side(payload, at)
+            if action_name == "start":
+                payload["running_side"] = side
+                payload["running_since"] = at.isoformat()
+                payload["last_side"] = side
+            ev.payload = payload
+            ev.save(update_fields=["payload", "updated_at"])
+        return Response(self.get_serializer(ev).data)
+
+    @action(detail=True, methods=["post"])
+    def finish(self, request, pk=None):
+        """Stop the clock and save. `ended_at` set means it is no longer live."""
+        at = _timer_instant(request.data.get("at"))
+        with transaction.atomic():
+            ev = self._locked_active(pk)
+            payload = dict(ev.payload or {})
+            _bank_running_side(payload, at)
+            if at < ev.started_at:
+                raise ValidationError("cannot finish before it started")
+            ev.payload = payload
+            ev.ended_at = at
+            ev.in_progress = False
+            ev.save(update_fields=["payload", "ended_at", "in_progress", "updated_at"])
+        return Response(self.get_serializer(ev).data)
+
+    def _locked_active(self, pk):
+        ev = (Event.objects.for_user(self.request.user).live()
+              .select_for_update().filter(pk=pk).first())
+        if ev is None:
+            raise NotFound("no such event")
+        if not ev.in_progress:
+            raise ValidationError("event is not in progress")
+        return ev
 
     @action(detail=False, methods=["get"])
     def latest(self, request):
@@ -162,6 +230,48 @@ def row_errors(row):
     if started and ended and ended < started:
         errors.append("ends before it starts")
     return errors
+
+
+MAX_CLOCK_SKEW = timedelta(minutes=5)
+
+
+def _timer_instant(raw):
+    """Parse a client-supplied timer instant, defaulting to now.
+
+    Clients supply the moment a button was tapped so a queued offline tap keeps
+    its real time -- but a wrong device clock must not write a nonsense event,
+    so anything meaningfully in the future is refused.
+    """
+    if not raw:
+        return timezone.now()
+    at = parse_datetime(raw)
+    if at is None:
+        raise ValidationError("'at' must be an ISO-8601 datetime")
+    if timezone.is_naive(at):
+        raise ValidationError("'at' must include a timezone offset")
+    if at > timezone.now() + MAX_CLOCK_SKEW:
+        raise ValidationError("'at' is in the future -- check the device clock")
+    return at
+
+
+def _bank_running_side(payload, at):
+    """Move the elapsed time of the running side into its accumulator.
+
+    Mutates `payload` in place and leaves the timer paused.
+    """
+    side = payload.get("running_side")
+    since = payload.get("running_since")
+    payload.pop("running_side", None)
+    payload.pop("running_since", None)
+    if not side or not since:
+        return
+    started = parse_datetime(since)
+    if started is None:
+        return
+    key = "right_sec" if side == "R" else "left_sec"
+    # A clock that jumps backwards must never subtract time already banked.
+    elapsed = max(0, int((at - started).total_seconds()))
+    payload[key] = int(payload.get(key) or 0) + elapsed
 
 
 def _spool(upload):

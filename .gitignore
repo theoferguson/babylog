@@ -10,3 +10,9 @@ server/staticfiles/
 # Tests use the synthetic fixture in server/events/testdata/ instead.
 huckleberry-export.csv
 *-export.csv
+
+# Expo / node
+app/node_modules/
+app/.expo/
+app/dist/
+app/web-build/

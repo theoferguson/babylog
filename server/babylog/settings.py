@@ -19,6 +19,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",
     "rest_framework",
     "rest_framework.authtoken",
     "events",
@@ -26,6 +27,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",  # must precede CommonMiddleware
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -51,8 +53,35 @@ DATABASES = {
     "default": dj_database_url.config(
         default=os.environ.get("DATABASE_URL", f"sqlite:///{BASE_DIR / 'dev.sqlite3'}"),
         conn_max_age=600,
+        conn_health_checks=True,
     )
 }
+
+if DATABASES["default"]["ENGINE"].endswith("sqlite3"):
+    # SQLite tuned for two concurrent writers on one machine. Defaults are
+    # tuned for a single-process desktop app and will throw "database is
+    # locked" the first time you and your partner log a feed at once.
+    DATABASES["default"]["OPTIONS"] = {
+        "init_command": (
+            # Readers never block the writer, and vice versa.
+            "PRAGMA journal_mode=WAL;"
+            # Safe with WAL: survives process crash, only risks the last commits
+            # on host power loss.
+            "PRAGMA synchronous=NORMAL;"
+            # Wait for a busy lock instead of failing instantly.
+            "PRAGMA busy_timeout=5000;"
+            "PRAGMA foreign_keys=ON;"
+            "PRAGMA temp_store=MEMORY;"
+            "PRAGMA cache_size=-16000;"  # 16MB page cache
+            "PRAGMA mmap_size=134217728;"  # 128MB
+        ),
+        # Take the write lock up front. Without this, two transactions that both
+        # read then write deadlock on lock upgrade and one dies with SQLITE_BUSY
+        # even though busy_timeout is set -- SQLite cannot resolve that by
+        # waiting.
+        "transaction_mode": "IMMEDIATE",
+    }
+    DATABASES["default"]["conn_max_age"] = 0  # cheap to reopen; avoids stale WAL readers
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": f"django.contrib.auth.password_validation.{n}"} for n in [
@@ -60,6 +89,20 @@ AUTH_PASSWORD_VALIDATORS = [
         "CommonPasswordValidator", "NumericPasswordValidator",
     ]
 ]
+
+# The web build is a separate origin from the API, so the browser needs CORS.
+# Native builds don't, which is why this only bites on web.
+#
+# An explicit allowlist, never CORS_ALLOW_ALL_ORIGINS: the API is token-
+# authenticated, and reflecting arbitrary origins would let any page a browser
+# visits read a signed-in user's data.
+CORS_ALLOWED_ORIGINS = [
+    o for o in os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:8081,http://127.0.0.1:8081,http://localhost:19006",
+    ).split(",") if o
+]
+CORS_ALLOW_CREDENTIALS = False  # auth is a bearer token, not a cookie
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

@@ -14,7 +14,7 @@ Rename the repo whenever you think of something better.
 | Client | **Expo + Expo Router + React Native Web** | One codebase → real iOS app *and* a browser build. The only option that satisfies "both phones" + "also accessible via browser" without writing it twice. |
 | Distribution | **EAS Build → TestFlight internal testing** ($99/yr Apple) | Internal testers skip App Review. Real app icon, real push. Wife installs TestFlight once, then updates arrive automatically. |
 | Web | `expo export --platform web` → static files served by the Django app | Same code, same components. No second frontend. |
-| Backend | **Django + DRF + Postgres on Fly** | You already run this stack and know its deploy story. |
+| Backend | **Django + DRF on Fly**, **SQLite on a volume** | You know the Django/Fly deploy story. Postgres was the original call; SQLite is right-sized for two writers and ~8k rows/year, and costs ~$0.15/mo against $38 for Fly Managed Postgres. Nothing in the code is Postgres-specific — the whole suite runs on both. |
 | Offline | **Server is source of truth. Client = persisted query cache + a write outbox.** | See "Offline" below. This is the biggest complexity decision in the project. |
 | Tenancy | `Household` is the tenant boundary from day one | One FK + one queryset filter. Makes "scalable to other users" nearly free without building an org/permissions system now. |
 | Auth | Django auth + DRF token, email + password | Trust boundary — not a place to be clever. Social login later if ever. |
@@ -96,6 +96,45 @@ need to index or aggregate on it in SQL.
 
 ---
 
+## Why SQLite, and what makes it safe here
+
+Two writers, ~22 events a day, ~8,000 rows a year. Postgres is the wrong size for
+that; Fly's Managed Postgres is $38/mo and even an unmanaged instance is a second
+machine to run. SQLite lives *inside* the app machine — the only added cost is
+the volume, about **$0.15/mo**.
+
+Out of the box SQLite would throw `database is locked` the first time you and
+your wife log a feed in the same second. Four pragmas and one Django option fix
+that, and they are the difference between "toy" and "fine for years":
+
+| setting | why |
+|---|---|
+| `journal_mode=WAL` | readers never block the writer, or each other |
+| `transaction_mode=IMMEDIATE` | takes the write lock up front — **the important one** |
+| `busy_timeout=5000` | wait for a lock instead of failing instantly |
+| `synchronous=NORMAL` | safe under WAL; survives process crash |
+
+`IMMEDIATE` is the one that isn't obvious. Two transactions that each read then
+write will deadlock upgrading a read lock to a write lock, and `busy_timeout`
+**cannot** rescue that — SQLite can't resolve it by waiting, so one dies with
+`SQLITE_BUSY` regardless. Verified: 4 concurrent writers, 160 rows, no errors.
+
+**The constraint this buys:** exactly one machine (`fly scale count 1`), because
+a volume can't be shared. That means brief downtime on deploy and no horizontal
+scaling. For a family tracker that is not a real cost.
+
+**Migrations run at container start, not as a Fly `release_command`** — release
+machines don't get volumes mounted, so a release-command migrate would build a
+throwaway database and leave `/data` untouched, silently.
+
+**Skipped:** Litestream continuous replication. Fly snapshots the volume daily
+(5-day retention) and `VACUUM INTO` gives you a consistent copy on demand. Add
+Litestream if losing a day of logs ever stops being acceptable.
+
+**The upgrade path**, if this ever outgrows one machine: `DATABASE_URL` is the
+only thing that changes. Point it at Postgres, run migrations, `loaddata` the
+dump. Nothing in the models, serializers or views is engine-specific.
+
 ## Units
 
 **The backend and the API are always metric** — `volume_ml`, `weight_g`,
@@ -150,6 +189,12 @@ requirement with occasional writes (logging a 3am feed in a basement).
 Add when you observe an actual lost edit — not before. This is the single
 easiest place to burn a month of evenings on this project.
 
+**One exception: the running nurse timer is server-authoritative**, because it
+has to be shared live between two phones (see "A running timer belongs to the
+household"). Last-write-wins would corrupt an accumulator that both devices are
+adding to. Offline, it degrades to a local timer and reconciles on reconnect —
+so you lose the *sharing*, never the timer.
+
 ---
 
 ## What Huckleberry actually does — and what to copy
@@ -163,31 +208,81 @@ structural, not pixel-level; verify against the real app on your phone.
 **There is no generic event form.** Each type gets its own screen, shaped to how
 that thing is actually recorded. Only nursing has a live timer.
 
-#### Nurse — the only timer
+#### Nurse — the only timer, and it is shared
+
 Two big buttons, **L** and **R**. Tap one to start it, tap again to stop; tapping
 the other **stops the running side and starts that one**. Then **Save**.
 
-Verified against your export: 0 of 98 feeds have overlapping sides, so
-mutual exclusion is right. 65 use both sides, 33 use one.
+Verified against a real export: 0 of 98 feeds have overlapping sides, so mutual
+exclusion is right. 65 use both sides, 33 use one.
 
 Each side is an **accumulator**, not a single stretch — you switch back and
 forth, so R→L→R adds into `right_sec`. The export only ever stores per-side
 totals, so segment order is not recoverable and not worth storing.
 
+##### A running timer belongs to the household, not the phone
+
+**Anyone with access can start, stop, edit and save the same running timer, and
+sees it live on their own device.** You start a feed, hand the baby over, and
+your wife stops it from her phone. Either of you can correct the sides before
+it's saved.
+
+This kills the obvious implementation — a timer living in the phone's local
+storage — because a second device can't see it. **An in-progress feed is just an
+`Event` with `ended_at = null`**, created on the *first tap*, not on Save. No new
+table, no new concept: the data model already allows it, and every existing
+endpoint (edit, soft-delete, the day timeline) works on it unchanged.
+
 ```
-started_at = first tap of any side
-ended_at   = Save
-right_sec, left_sec = accumulated per side
-last_side  = which side ran last   <- powers "start on L" on the home screen
+first tap of L or R   ->  POST /api/events/           creates it, ended_at null
+each subsequent tap   ->  POST /api/events/{id}/timer/  {action, side, at}
+Save                  ->  POST /api/events/{id}/finish/ sets ended_at
+Discard               ->  DELETE /api/events/{id}/      soft delete
 ```
+
+**The server owns the accumulators.** Clients send *intents* ("started L at
+14:03:12"), never computed totals. If both phones each computed `right_sec` from
+their own view and PATCHed it, the second write would silently clobber the
+first — and with two people passing a baby back and forth, that is the normal
+case, not an edge case. The payload therefore carries the live state:
+
+```
+right_sec, left_sec     accumulated, server-computed
+running_side  L | R | null    null = paused
+running_since <ts> | null     when the current side started
+```
+
+Elapsed time for the running side is `now - running_since`, so every device
+renders a correct ticking clock without any of them agreeing on a clock.
+
+##### Live updates: poll, don't socket
+
+`GET /api/events/active/` returns the household's in-progress events. Clients
+poll it **every 3s while a timer is running**, plus once on app foreground, and
+not at all otherwise.
+
+**Skipped:** WebSockets, Django Channels, ASGI, Redis. Live-updating a single
+row for two people does not justify a second protocol and a broker on a
+512MB machine. A 3-second poll that only runs during a feed is a few dozen
+requests per feed.
+<!-- ponytail: 3s polling; move to SSE if you ever have enough users that the
+     request volume shows up on a graph -->
+
+##### What this costs
+
+- **A feed reaches the server before it's finished.** Offline, the app falls back
+  to a local timer and reconciles on reconnect — you lose only the *shared* part
+  while offline, not the timer.
+- **Abandoned timers are real.** A tap that never gets saved leaves an event with
+  `ended_at = null` forever. The app should surface anything running longer than
+  ~3h as "still nursing?" and offer to finish or discard it.
 
 `last_side` is one string and is the thing nursing parents actually want to know
 at 3am. Not in Huckleberry's export; add it anyway.
 
-**The timer must survive the app being closed.** Persist `{running_side,
-segment_started_at, right_sec, left_sec}` to AsyncStorage on every tap, and
-show a resumable in-progress banner on launch. A timer that dies when you
-switch apps is worse than no timer.
+**Local fallback still matters.** Persist `{running_side, running_since,
+right_sec, left_sec}` to AsyncStorage on every tap so a dead battery or a killed
+app loses nothing — but the server copy is authoritative whenever it's reachable.
 
 #### Bottle / Diaper / Pump — instant, no timer
 Timestamp **defaults to now**, with a small tappable time chip to back it up
@@ -348,9 +443,14 @@ a private one. Tests and the parser self-check run against a synthetic 13-row
 fixture in `server/events/testdata/` built to hit every parser branch. Import
 your own file by path once you have an account in dev or prod.
 
-**Status:** built and tested locally — 18 tests green against the synthetic
-fixture. Remaining: `fly launch` + Postgres (yours to run; see README), then
-import your own export.
+**Status:** built, tested and **deployed** — https://babylog-app.fly.dev.
+18 tests green against the synthetic fixture; SQLite on a Fly volume with WAL +
+IMMEDIATE verified in production.
+
+**The real import waits for the UI.** Nothing is loaded into prod yet, on
+purpose: the whole point of the preview/commit split is reviewing 224 rows with
+checkboxes and warnings, and a CLI import would bypass exactly the step that was
+asked for. Import once Phase 2 ships the review screen.
 
 #### The export format, decoded
 
@@ -452,7 +552,7 @@ the draft and re-uploading is the recovery path.
 Ids are derived from row content, so **both paths are idempotent** — the CLI
 command and the API commit can run twice with no duplicates.
 
-### Phase 2 — Log + day view
+### Phase 2 — Log + day view  🚧 **in progress**
 Expo app. Auth screen, baby switcher, the logging forms for the types you
 actually use — **feed, diaper, pump** — and the **day timeline**. Ship to
 TestFlight and to the web build.
@@ -473,15 +573,36 @@ slot in later with no new code. Hand-rolled, ~100 lines of absolute
 positioning — no library does this view well. Header shows the day's rollup:
 feeds, total minutes, diaper counts, oz pumped.
 
-**Done when:** both phones have it, you log a real day on it, and you'd rather
-open it than Huckleberry.
+Also in Phase 2, because both depend on the API being live:
+- **The shared nurse timer** (see above) — server-owned accumulators, 3s polling,
+  the abandoned-timer nudge.
+- **The import review screen** — checkbox per row, red warnings, select-all.
+  This is what unblocks loading your real history.
+
+**Built so far:** Expo Router app (iOS + web from one codebase), token auth with
+the token in the keychain on device, home screen with last-event summary and the
+2x2 log buttons, the shared L/R nurse timer end to end, bottle / diaper / pump
+forms, and the 24h day timeline. Server side: `active/`, `timer/`, `finish/`
+with 27 tests.
+
+**Still to build:** the import review screen, baby/household setup UI, editing an
+event by tapping it, and the abandoned-timer nudge.
+
+**Done when:** both phones have it, your real Huckleberry history is imported
+through the review screen, you log a real day on it, and you'd rather open it
+than Huckleberry.
 
 ### Phase 3 — Calendar navigation + edit
 Move between days and see patterns across them:
 - **Week strip** above the timeline — tap to jump, density per day.
 - **List view** — flat reverse-chron across days, for scanning and searching.
   Nearly free once the timeline exists; both read the same query.
-- **Tap any event to edit or delete**, using the Phase 2 forms in edit mode.
+- **Every event on the calendar is tappable, and opens editable.** Day timeline,
+  week strip and list all route to the same editor; it reuses the Phase 2 forms
+  in edit mode rather than a second set of screens. Delete is a soft delete, so
+  it syncs to the other phone rather than silently reappearing.
+  *(Today the timeline only responds to taps on a running timer — everything
+  else is display-only until this ships.)*
 - **Backdated entry** — logging a feed you forgot two hours ago. Needed more
   often than it sounds.
 
@@ -523,6 +644,64 @@ server, no FCM, no APNs certificates. Add real push only when you need to notify
 
 ---
 
+### Phase 8 — iOS widgets and Live Activities
+
+Two widgets, both about not opening the app:
+
+- **Last event** — "Last feed 2h 14m ago · 21m · R 13 · L 8", plus last diaper and
+  last pump. The home screen's summary block, on the home screen proper.
+- **Running timer** — while a nurse timer is going, show it counting, with
+  **L / R / Save** buttons right on the widget.
+
+#### What this actually requires
+
+Widgets are **not React Native**. They are a separate WidgetKit extension target
+written in SwiftUI, so this is real native work, not a library install.
+
+- **Not possible in Expo Go** — needs a custom native build. Already fine: the
+  EAS Build + TestFlight path is the plan (see Decisions).
+- `expo-apple-targets` adds the extension target to the Expo project without
+  ejecting to bare.
+- **App Group** shared container (`group.<bundle-id>.babylog`) is how the RN app
+  and the widget exchange data. The app writes the last-event summary and any
+  running-timer state; the widget only ever reads local state — widgets can't
+  reliably do network calls.
+
+#### The two things that trip people up
+
+**A widget cannot tick every second via timeline reloads.** WidgetKit budgets
+roughly 15–40 refreshes per day, so a per-second reload is impossible. The
+mechanism that *does* work is SwiftUI rendering a self-updating clock:
+`Text(startDate, style: .timer)` for the running side and
+`Text(lastFeed, style: .relative)` for "2h 14m ago". Both update on their own
+with **zero** timeline reloads. Reload the timeline only when the underlying
+event changes, via `WidgetCenter.shared.reloadAllTimelines()`.
+
+**Buttons on a widget need App Intents** (iOS 17+). That's what makes L / R /
+Save tappable without opening the app. The intent calls the same
+`/events/{id}/timer/` endpoint the app uses.
+
+#### Live Activities are the better fit for a running feed
+
+An in-progress nursing session is exactly what ActivityKit is for: lock screen
+and Dynamic Island, live, with the same interactive buttons. At 3am you see it
+without unlocking. Build the Live Activity **before** the home-screen timer
+widget — same SwiftUI views, and it's where you'd actually look.
+
+#### The honest limitation
+
+A widget shows *last known* state. When your wife starts a feed on her phone,
+your widget won't know until your app syncs. Closing that gap needs a **push
+notification to trigger the reload** — which means real APNs, and is the point at
+which Phase 7's local-only notifications stop being enough.
+
+That's a fair trade to defer: the widget is still correct for whoever started the
+timer, and the Live Activity is live on the device that owns the session.
+
+**Skipped until asked:** Android widgets, Apple Watch, complications.
+
+---
+
 ## Settled
 
 - **Units: metric canonical**, imperial is a client-side display preference.
@@ -533,6 +712,8 @@ server, no FCM, no APNs certificates. Add real push only when you need to notify
   per type — CVD-verified, min ΔE 13.6 on fills across all colourblindness types.
 - **Two logins**, one each. `Membership` and `created_by` stay — worth knowing
   who logged what at 3am.
+- **SQLite on a Fly volume**, WAL + IMMEDIATE, one machine. Postgres remains a
+  `DATABASE_URL` change away.
 - **Timezone travel: yes.** UTC + recording zone; see above.
 - **CSV decoded**; the real export stays out of the repo, tests use a
   synthetic fixture.
@@ -548,8 +729,13 @@ server, no FCM, no APNs certificates. Add real push only when you need to notify
 - **Configurable = babies and users.** A settings screen with two lists, not a
   widget system.
 - **Sleep gets both** live buttons and backfill pickers, when it starts.
+- **Timers are shared and live across devices.** An in-progress feed is an
+  `Event` with `ended_at = null`, created on first tap; the server owns the
+  accumulators; clients poll every 3s while one is running.
 - **Home screen** = last-event summary (relative times) → 2x2 log buttons →
   today's timeline.
+- **iOS widgets + Live Activities** are Phase 8 — native WidgetKit work, App
+  Group for data, `Text(style: .timer)` for ticking, App Intents for buttons.
 
 ## Open questions
 

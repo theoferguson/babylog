@@ -12,6 +12,10 @@ PAYLOAD_FIELDS = {
         "right_sec": (int, False),
         "left_sec": (int, False),
         "last_side": (str, False),      # L | R
+        # Live timer state, owned by the server. Clients send intents to
+        # /timer/, never these values.
+        "running_side": (str, False),   # L | R, or absent when paused
+        "running_since": (str, False),  # iso8601
         "contents": (str, False),
         "volume_ml": (float, False),
     },
@@ -64,6 +68,8 @@ def validate_payload(kind, payload):
             raise serializers.ValidationError("feed.method must be 'breast' or 'bottle'")
         if payload.get("last_side") not in (None, "L", "R"):
             raise serializers.ValidationError("feed.last_side must be 'L' or 'R'")
+        if payload.get("running_side") not in (None, "L", "R"):
+            raise serializers.ValidationError("feed.running_side must be 'L' or 'R'")
     if kind == Event.DIAPER:
         for k in ("pee", "poo"):
             if payload.get(k) not in (None, *SIZES):
@@ -100,13 +106,17 @@ class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = ["id", "baby", "type", "started_at", "ended_at", "tz", "payload",
-                  "notes", "created_by", "updated_at", "deleted_at", "duration_sec"]
+                  "notes", "created_by", "updated_at", "deleted_at", "duration_sec",
+                  "in_progress"]
         read_only_fields = ["created_by", "updated_at"]
 
     def validate(self, attrs):
         kind = attrs.get("type", getattr(self.instance, "type", None))
         payload = attrs.get("payload", getattr(self.instance, "payload", {}) or {})
         validate_payload(kind, payload)
+
+        if attrs.get("in_progress") and attrs.get("ended_at"):
+            raise serializers.ValidationError("an in-progress event cannot have ended_at")
 
         start = attrs.get("started_at", getattr(self.instance, "started_at", None))
         end = attrs.get("ended_at", getattr(self.instance, "ended_at", None))

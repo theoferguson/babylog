@@ -24,6 +24,10 @@ Palette check (re-run if you change a theme colour): `.venv/bin/python palette-c
 
 Two paths, same parser and the same content-derived ids, so both are idempotent:
 
+Nothing has been imported into production yet — that waits for the Phase 2
+review UI, so the 224 rows get checkboxes and warnings instead of a blind CLI
+load.
+
 Real exports are **not kept in this repo** — they're health data about a real
 child, and `.gitignore` blocks `*-export.csv`. Keep yours outside the tree and
 pass a path. Tests and the parser self-check run against the synthetic fixture in
@@ -39,6 +43,57 @@ pass a path. Tests and the parser self-check run against the synthetic fixture i
   Commit is **per-row**: valid rows save, invalid ones come back in `skipped`
   with their index and reasons, so you can fix and re-send just those.
 
+## Deploy (Fly)
+
+SQLite on a volume, one machine. See PLAN.md for why, and for the pragmas.
+
+```sh
+fly volumes create babylog_data --region iad --size 1
+fly scale count 1                       # a volume cannot be shared
+fly secrets set \
+  SECRET_KEY="$(python3 -c 'import secrets;print(secrets.token_urlsafe(50))')" \
+  ALLOWED_HOSTS=babylog-honeyed-hillside-7890.fly.dev \
+  CSRF_TRUSTED_ORIGINS=https://babylog-honeyed-hillside-7890.fly.dev
+fly deploy                              # migrations run at container start
+fly ssh console -C "python manage.py createsuperuser"
+```
+
+`DATABASE_URL` is set in `fly.toml`, not as a secret — it holds no credentials.
+
+**Backups.** Fly snapshots the volume daily (5-day retention). For a consistent
+copy on demand — never copy the `.sqlite3` file directly, the WAL sidecar means
+you'd get a torn database:
+
+```sh
+fly ssh console -C "python -c \"import sqlite3;sqlite3.connect('/data/babylog.sqlite3').execute('VACUUM INTO \'/data/backup.sqlite3\'')\""
+fly ssh sftp get /data/backup.sqlite3
+```
+
+## App (Expo)
+
+```sh
+cd app
+npm install
+npx expo start            # then i for iOS simulator, w for web
+```
+
+Points at `https://babylog-app.fly.dev` by default. For a local server:
+
+```sh
+EXPO_PUBLIC_API_URL=http://localhost:8000 npx expo start
+```
+
+Formatting logic has a plain-node check: `node src/format.test.mjs`.
+Web build: `npx expo export --platform web`.
+
+| file | |
+|---|---|
+| `src/theme.js` | the verified palette; every colour comes from here |
+| `src/api.js` | fetch wrapper, token storage, endpoint list |
+| `src/useActive.js` | polls running timers every 3s, foreground refresh |
+| `src/Timeline.js` | the 24h day view |
+| `app/nurse.js` | the shared L/R timer |
+
 ## API
 
 | | |
@@ -46,6 +101,9 @@ pass a path. Tests and the parser self-check run against the synthetic fixture i
 | `POST /api/auth/token/` | username + password → token |
 | `GET/POST /api/events/` | filters: `baby`, `type`, `since`, `until` |
 | `GET /api/events/latest/` | one row per type, for the home screen |
+| `GET /api/events/active/` | running timers, polled by every device |
+| `POST /api/events/{id}/timer/` | `{action: start\|stop, side, at}` — server owns the accumulators |
+| `POST /api/events/{id}/finish/` | stop the clock and save |
 | `DELETE /api/events/{id}/` | soft delete |
 | `/api/babies/`, `/api/households/` | setup |
 

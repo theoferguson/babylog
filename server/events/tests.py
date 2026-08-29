@@ -188,3 +188,132 @@ class ImportReviewApiTests(APITestCase):
         junk = SimpleUploadedFile("x.csv", b"Type,Start\nSpaceship,2026-01-01 00:00\n")
         r = self.client.post("/api/import/preview/", {"file": junk}, format="multipart")
         self.assertEqual(r.status_code, 400)
+
+
+class SharedTimerTests(APITestCase):
+    """A running timer belongs to the household, not to the phone that started it."""
+
+    def setUp(self):
+        self.theo, self.hh, self.baby = make_household("theo-timer")
+        self.partner = User.objects.create_user("partner", password="pw-for-tests-only")
+        Membership.objects.create(user=self.partner, household=self.hh)
+        self.t0 = timezone.now() - timedelta(minutes=30)
+        self.client.force_authenticate(self.theo)
+
+    def start_feed(self):
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json")
+        self.assertEqual(r.status_code, 201, r.json())
+        return r.json()["id"]
+
+    def tick(self, ev_id, action, side=None, at=None):
+        body = {"action": action}
+        if side:
+            body["side"] = side
+        if at:
+            body["at"] = at.isoformat()
+        return self.client.post(f"/api/events/{ev_id}/timer/", body, format="json")
+
+    def test_partner_sees_and_stops_the_timer_theo_started(self):
+        ev_id = self.start_feed()
+        self.tick(ev_id, "start", "R", self.t0)
+
+        # Partner's phone polls and finds it running.
+        self.client.force_authenticate(self.partner)
+        active = self.client.get("/api/events/active/").json()
+        self.assertEqual(len(active["events"]), 1)
+        self.assertEqual(active["events"][0]["payload"]["running_side"], "R")
+
+        # ...and stops it 13 minutes in, from their device.
+        r = self.tick(ev_id, "stop", at=self.t0 + timedelta(minutes=13))
+        self.assertEqual(r.json()["payload"]["right_sec"], 13 * 60)
+        self.assertNotIn("running_side", r.json()["payload"])
+
+    def test_sides_accumulate_across_switches(self):
+        ev_id = self.start_feed()
+        self.tick(ev_id, "start", "R", self.t0)
+        # Switching sides banks the running one and starts the other.
+        self.tick(ev_id, "start", "L", self.t0 + timedelta(minutes=13))
+        self.tick(ev_id, "start", "R", self.t0 + timedelta(minutes=21))  # back to R
+        r = self.tick(ev_id, "stop", at=self.t0 + timedelta(minutes=25))
+        p = r.json()["payload"]
+        self.assertEqual(p["right_sec"], (13 + 4) * 60)  # R ran twice
+        self.assertEqual(p["left_sec"], 8 * 60)
+        self.assertEqual(p["last_side"], "R")
+
+    def test_finish_sets_end_and_leaves_active(self):
+        ev_id = self.start_feed()
+        self.tick(ev_id, "start", "L", self.t0)
+        end = self.t0 + timedelta(minutes=20)
+        r = self.client.post(f"/api/events/{ev_id}/finish/",
+                             {"at": end.isoformat()}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["payload"]["left_sec"], 20 * 60)
+        self.assertFalse(r.json()["in_progress"])
+        self.assertEqual(self.client.get("/api/events/active/").json()["events"], [])
+        # ...and a finished timer cannot be ticked again.
+        self.assertEqual(self.tick(ev_id, "start", "R").status_code, 400)
+
+    def test_editing_while_running_does_not_disturb_the_clock(self):
+        ev_id = self.start_feed()
+        self.tick(ev_id, "start", "R", self.t0)
+        r = self.client.patch(f"/api/events/{ev_id}/", {"notes": "fussy"}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["payload"]["running_side"], "R")
+
+    def test_rejects_future_and_naive_timestamps(self):
+        ev_id = self.start_feed()
+        future = (timezone.now() + timedelta(hours=2)).isoformat()
+        self.assertEqual(self.tick(ev_id, "start", "R",
+                                   timezone.now() + timedelta(hours=2)).status_code, 400)
+        r = self.client.post(f"/api/events/{ev_id}/timer/",
+                             {"action": "start", "side": "R",
+                              "at": "2026-08-28T10:00:00"}, format="json")
+        self.assertEqual(r.status_code, 400)  # naive, no offset
+        self.assertIn("timezone", str(r.json()).lower())
+
+    def test_backwards_clock_never_subtracts_banked_time(self):
+        ev_id = self.start_feed()
+        self.tick(ev_id, "start", "R", self.t0)
+        # A device whose clock has drifted backwards reports an earlier stop.
+        r = self.tick(ev_id, "stop", at=self.t0 - timedelta(minutes=5))
+        self.assertEqual(r.json()["payload"].get("right_sec"), 0)
+
+    def test_another_household_cannot_touch_the_timer(self):
+        ev_id = self.start_feed()
+        outsider, _, _ = make_household("outsider")
+        self.client.force_authenticate(outsider)
+        self.assertEqual(self.client.get("/api/events/active/").json()["events"], [])
+        self.assertEqual(self.tick(ev_id, "stop").status_code, 404)
+
+    def test_in_progress_event_cannot_carry_an_end(self):
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(),
+            "ended_at": timezone.now().isoformat(),
+            "in_progress": True, "payload": {"method": "breast"}}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_discarding_a_timer_removes_it_from_active(self):
+        ev_id = self.start_feed()
+        self.tick(ev_id, "start", "R", self.t0)
+        self.assertEqual(self.client.delete(f"/api/events/{ev_id}/").status_code, 204)
+        self.assertEqual(self.client.get("/api/events/active/").json()["events"], [])
+
+
+class CorsTests(APITestCase):
+    """The web build is a different origin from the API; native builds are not."""
+
+    def test_allowed_origin_gets_a_cors_header(self):
+        r = self.client.options("/api/auth/token/", HTTP_ORIGIN="http://localhost:8081",
+                                HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST")
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "http://localhost:8081")
+
+    def test_unknown_origin_gets_nothing(self):
+        # Never reflect arbitrary origins: the API is token-authenticated, and a
+        # permissive header would let any page a browser visits read this data.
+        r = self.client.options("/api/auth/token/", HTTP_ORIGIN="https://evil.example",
+                                HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST")
+        self.assertIsNone(r.headers.get("Access-Control-Allow-Origin"))

@@ -60,6 +60,9 @@ class EventQuerySet(models.QuerySet):
     def live(self):
         return self.filter(deleted_at__isnull=True)
 
+    def active(self):
+        return self.live().filter(in_progress=True)
+
     def for_user(self, user):
         return self.filter(household__membership__user=user)
 
@@ -93,6 +96,10 @@ class Event(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)  # last-write-wins key
     deleted_at = models.DateTimeField(null=True, blank=True)  # soft delete, so sync sees it
+    # A running timer, shared across the household's devices. Not derivable from
+    # `ended_at is None` -- instant events (diaper, bottle, pump) have no end
+    # either, and a paused timer is still in progress.
+    in_progress = models.BooleanField(default=False)
 
     objects = EventQuerySet.as_manager()
 
@@ -101,12 +108,17 @@ class Event(models.Model):
         indexes = [
             models.Index(fields=["household", "-started_at"]),
             models.Index(fields=["baby", "type", "-started_at"]),
+            models.Index(fields=["household", "in_progress"]),
         ]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(ended_at__isnull=True)
                 | models.Q(ended_at__gte=models.F("started_at")),
                 name="event_ends_after_it_starts",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(in_progress=False) | models.Q(ended_at__isnull=True),
+                name="in_progress_events_have_no_end",
             ),
         ]
 
