@@ -594,19 +594,34 @@ of birth and colour.
 date and time picker — the browser's own inputs on web, the platform picker on
 iOS. Future times are clamped, since an event cannot have happened yet.
 
-**Invites are built**, so a second parent no longer needs the Django admin.
-Settings → Invite someone mints a single-use code; the login screen has "I have
-an invite code". `POST /api/auth/register/` is the **only unauthenticated write
-in the API**, so it is the most defended thing here:
+**Email invites are built**, so a second parent no longer needs the Django admin.
+Settings → Invite someone takes an email address and sends a link; the recipient
+opens `/join?code=…`, picks a username and password, and is in. Nobody copies a
+code by hand.
 
-- the code is 24 random bytes, single use, and expires after a week
+`POST /api/auth/register/` is the **only unauthenticated write in the API**, so
+it is the most defended thing here:
+
+- **the link creates exactly one account and then stops working** — `accepted_at`
+  is set on use, re-checked under `select_for_update` inside the transaction so
+  two simultaneous redemptions cannot both win, and a DB check constraint keeps
+  `accepted_at`/`accepted_by` in step so "already used" can never drift
+- the code is 24 random bytes and expires after a week
 - missing, used and expired codes return the **same** message, so probing cannot
   tell a real code from a fake one
-- the code is re-checked under `select_for_update` inside the transaction, so two
-  simultaneous redemptions cannot both win
 - passwords go through Django's validators, not a length check
-- the endpoint is throttled to 10/hour per anonymous client
+- usernames collide case-insensitively
 - a rejected registration never consumes the invite
+- throttled to 20/hour per anonymous client — loose enough that two parents
+  behind one home IP fumbling a password are not locked out, which 10/hour was
+  not
+- the raw code is never returned on its own, only inside the link
+
+**Email is plain Django SMTP configured by environment variables**, defaulting to
+Gmail. No dependency, no provider lock-in: any SMTP host works by overriding
+`EMAIL_HOST`. With no host set, mail is printed to the log rather than silently
+dropped. A send failure never loses the invite — the response says
+`email_sent: false` and the UI offers the link to pass on by hand.
 
 **Still to build:** the abandoned-timer nudge.
 

@@ -13,9 +13,10 @@ function Gate() {
 
   useEffect(() => {
     if (!ready) return;
-    const onLogin = segments[0] === 'login';
-    if (!signedIn && !onLogin) router.replace('/login');
-    if (signedIn && onLogin) router.replace('/');
+    // /join must stay reachable while signed out -- it is how you get an account.
+    const onAuthScreen = segments[0] === 'login' || segments[0] === 'join';
+    if (!signedIn && !onAuthScreen) router.replace('/login');
+    if (signedIn && onAuthScreen) router.replace('/');
   }, [ready, signedIn, segments, router]);
 
   if (!ready) {
@@ -36,6 +37,7 @@ function Gate() {
     >
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="join" options={{ headerShown: false }} />
       <Stack.Screen name="nurse" options={{ title: 'Nursing' }} />
       <Stack.Screen name="log/bottle" options={{ title: 'Bottle' }} />
       <Stack.Screen name="log/diaper" options={{ title: 'Diaper' }} />

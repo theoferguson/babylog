@@ -16,6 +16,10 @@ from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import AnonRateThrottle
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
+
+from .mail import send_invite
 from .models import Baby, Event, Household, Invite, Membership
 from .serializers import (BabySerializer, EventSerializer, HouseholdSerializer,
                           InviteSerializer, RegisterSerializer, validate_payload)
@@ -395,16 +399,42 @@ class InviteViewSet(viewsets.ModelViewSet):
         return Invite.objects.filter(household__membership__user=self.request.user)
 
     def create(self, request, *args, **kwargs):
+        email = (request.data.get("email") or "").strip()
+        if not email:
+            raise ValidationError({"email": "who should this go to?"})
+        try:
+            validate_email(email)
+        except DjangoValidationError:
+            raise ValidationError({"email": "that does not look like an email address"})
+
         invite = Invite.objects.create(
-            household=current_household(request), created_by=request.user
+            household=current_household(request), created_by=request.user, email=email
         )
-        return Response(self.get_serializer(invite).data, status=status.HTTP_201_CREATED)
+        sent = send_invite(invite)
+        data = self.get_serializer(invite).data
+        # A bounce must not lose the invite: the link is still in the response so
+        # it can be passed on another way.
+        data["email_sent"] = sent
+        return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def resend(self, request, pk=None):
+        invite = self.get_queryset().filter(pk=pk).first()
+        if invite is None:
+            raise NotFound("no such invite")
+        if not invite.is_usable:
+            raise ValidationError("that invite has already been used or has expired")
+        data = self.get_serializer(invite).data
+        data["email_sent"] = send_invite(invite)
+        return Response(data)
 
 
 class RegisterThrottle(AnonRateThrottle):
     # Codes are 24 random bytes, so guessing is hopeless; this just stops anyone
-    # hammering the one unauthenticated write in the API.
-    rate = "10/hour"
+    # hammering the one unauthenticated write in the API. Kept loose enough that
+    # two parents behind one home IP, fumbling a password, are not locked out.
+    scope = "register"
+    rate = "20/hour"
 
 
 @api_view(["POST"])

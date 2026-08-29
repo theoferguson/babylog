@@ -91,7 +91,8 @@ export async function login(username, password) {
 
 export const Invites = {
   list: () => api.get('/api/invites/'),
-  create: () => api.post('/api/invites/', {}),
+  create: (email) => api.post('/api/invites/', { email }),
+  resend: (id) => api.post(`/api/invites/${id}/resend/`, {}),
   revoke: (id) => api.del(`/api/invites/${id}/`),
 };
 

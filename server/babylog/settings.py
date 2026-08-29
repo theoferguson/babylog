@@ -105,12 +105,40 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_CREDENTIALS = False  # auth is a bearer token, not a cookie
 
+# Where the invite link points. Must match the deployed host.
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://babylog-app.fly.dev")
+
+# Gmail SMTP. EMAIL_HOST_PASSWORD must be a Google **App Password**, not the
+# account password -- Google removed plain-password SMTP, so an app password
+# (which needs 2FA on the account) is the only thing that authenticates.
+# Any other SMTP provider works by overriding these; nothing is Gmail-specific.
+#
+# With no host configured, email is printed to the log instead of sent: right in
+# development, and an honest no-op rather than a silent failure in production.
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "smtp.gmail.com" if os.environ.get("EMAIL_HOST_USER") else "")
+EMAIL_BACKEND = (
+    "django.core.mail.backends.smtp.EmailBackend"
+    if EMAIL_HOST
+    else "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "1") == "1"
+EMAIL_TIMEOUT = 10
+# Gmail rewrites the From header to the authenticated account anyway, so default
+# to it rather than pretending otherwise.
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL") or (
+    f"babylog <{EMAIL_HOST_USER}>" if EMAIL_HOST_USER else "babylog@localhost"
+)
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
+    "DEFAULT_THROTTLE_RATES": {"register": "20/hour"},
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 200,
 }

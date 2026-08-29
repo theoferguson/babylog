@@ -50,16 +50,20 @@ def new_invite_code():
 
 
 class Invite(models.Model):
-    """A single-use code that lets someone create an account in this household.
+    """A single-use link, emailed to someone, that lets them create an account
+    in this household.
 
-    Exists so a second parent does not need the Django admin. The code is the
-    only credential, so it is long, random, single-use and expires.
+    Exists so a second parent does not need the Django admin. The code inside
+    the link is the only credential, so it is long, random, single-use and
+    expires.
     """
 
     LIFETIME = timedelta(days=7)
 
     code = models.CharField(max_length=64, unique=True, default=new_invite_code)
+    email = models.EmailField()
     household = models.ForeignKey(Household, on_delete=models.CASCADE, related_name="invites")
+    sent_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
         related_name="invites_sent",
@@ -74,6 +78,16 @@ class Invite(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            # An accepted invite must name who accepted it, and vice versa. The
+            # pair is what makes "already used" unambiguous rather than a flag
+            # that could drift out of step with reality.
+            models.CheckConstraint(
+                condition=models.Q(accepted_at__isnull=True, accepted_by__isnull=True)
+                | models.Q(accepted_at__isnull=False, accepted_by__isnull=False),
+                name="invite_acceptance_is_all_or_nothing",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.expires_at:
@@ -85,7 +99,10 @@ class Invite(models.Model):
         return self.accepted_at is None and self.expires_at > timezone.now()
 
     def __str__(self):
-        return f"invite to {self.household} ({'used' if self.accepted_at else 'open'})"
+        return f"invite for {self.email} to {self.household}"
+
+    def link(self, base):
+        return f"{base.rstrip('/')}/join?code={self.code}"
 
 
 class Baby(models.Model):

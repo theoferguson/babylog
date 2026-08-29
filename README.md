@@ -123,13 +123,33 @@ TestFlight once and updates arrive automatically.
 Native builds talk to `expo.extra.apiUrl` (the absolute Fly URL). Only the web
 build is compiled `same-origin`.
 
+## Email (invites)
+
+Plain Django SMTP, configured by environment variables — Gmail by default, but
+any provider works by overriding `EMAIL_HOST`. With none set, mail is printed to
+the log instead of sent.
+
+Gmail needs an **App Password**, not your account password: turn on 2-Step
+Verification, then create one at <https://myaccount.google.com/apppasswords>.
+
+```sh
+fly secrets set \
+  EMAIL_HOST_USER="you@gmail.com" \
+  EMAIL_HOST_PASSWORD="the-16-char-app-password" \
+  DEFAULT_FROM_EMAIL="babylog <you@gmail.com>" \
+  PUBLIC_BASE_URL="https://babylog-app.fly.dev"
+```
+
+Gmail rewrites the From header to the authenticated account, so `DEFAULT_FROM_EMAIL`
+should be that same address. Sending limit is ~500/day, which is not a constraint here.
+
 ## API
 
 | | |
 |---|---|
 | `POST /api/auth/token/` | username + password → token |
 | `POST /api/auth/register/` | join a household with an invite code (public, throttled) |
-| `/api/invites/` | mint, list and revoke single-use invite codes |
+| `/api/invites/` | email, list, resend and revoke single-use invites |
 | `GET/POST /api/events/` | filters: `baby`, `type`, `since`, `until` |
 | `GET /api/events/latest/` | one row per type, for the home screen |
 | `GET /api/events/active/` | running timers, polled by every device |

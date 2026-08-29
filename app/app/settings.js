@@ -253,8 +253,10 @@ function BabyCard({ baby, isNew, busy, onSave, onArchive, onDelete, onCancel }) 
 
 function InviteSection() {
   const [invites, setInvites] = useState(null);
+  const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [note, setNote] = useState(null);
 
   const load = async () => {
     try {
@@ -266,11 +268,17 @@ function InviteSection() {
   };
   useEffect(() => { load(); }, []);
 
-  const create = async () => {
+  const run = async (fn, okMsg) => {
     setBusy(true);
     setError(null);
+    setNote(null);
     try {
-      await Invites.create();
+      const body = await fn();
+      // Delivery can fail for reasons the server cannot fix. Say so, and leave
+      // the link available rather than pretending it was sent.
+      setNote(body?.email_sent === false
+        ? 'Could not send the email — share the link below instead.'
+        : okMsg);
       await load();
     } catch (e) {
       setError(e);
@@ -279,30 +287,15 @@ function InviteSection() {
     }
   };
 
-  const revoke = async (id) => {
-    setBusy(true);
-    try {
-      await Invites.revoke(id);
-      await load();
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const share = async (code) => {
+  const share = async (invite) => {
     const message =
-      `Join our babylog household.\n\n` +
-      `1. Open https://babylog-app.fly.dev\n` +
-      `2. Tap "I have an invite code"\n` +
-      `3. Code: ${code}`;
+      `Join our babylog household — open this link to create your account:\n${invite.link}`;
     if (Platform.OS === 'web') {
       try {
-        await navigator.clipboard.writeText(message);
-        window.alert('Invite copied to the clipboard.');
+        await navigator.clipboard.writeText(invite.link);
+        window.alert('Invite link copied to the clipboard.');
       } catch {
-        window.prompt('Copy this invite:', message);
+        window.prompt('Copy this invite link:', invite.link);
       }
       return;
     }
@@ -311,33 +304,50 @@ function InviteSection() {
 
   return (
     <View style={{ gap: 10, marginTop: 6 }}>
+      <Text style={s.h2}>Invite someone</Text>
+      <TextInput
+        style={s.input}
+        placeholder="Their email address"
+        placeholderTextColor={c.muted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        keyboardType="email-address"
+        value={email}
+        onChangeText={setEmail}
+      />
+      <Button
+        title={busy ? 'Sending…' : 'Send invite'}
+        onPress={() => run(async () => {
+          const body = await Invites.create(email.trim());
+          setEmail('');
+          return body;
+        }, `Invite sent to ${email.trim()}.`)}
+        disabled={busy || !email.trim()}
+      />
+      {note ? <Text style={s.muted}>{note}</Text> : null}
+
       {(invites || []).map((i) => (
         <View key={i.id} style={[s.card, { gap: 8 }]}>
-          <Text style={s.muted}>Invite code — single use</Text>
-          <Text selectable style={{ fontSize: 15, fontWeight: '700', color: c.text }}>
-            {i.code}
-          </Text>
+          <Text style={[s.body, { fontWeight: '700' }]}>{i.email}</Text>
           <Text style={s.muted}>
-            Expires {new Date(i.expires_at).toLocaleDateString([], {
-              month: 'short', day: 'numeric',
-            })}
+            {i.sent_at ? 'Sent' : 'Not sent'} · expires{' '}
+            {new Date(i.expires_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
           </Text>
-          <View style={[s.row, { gap: 10 }]}>
-            <Button title="Share" onPress={() => share(i.code)} style={{ flex: 1 }} />
-            <Button title="Revoke" tone="plain" onPress={() => revoke(i.id)}
-                    disabled={busy} style={{ flex: 1 }} />
+          <View style={[s.row, { gap: 8 }]}>
+            <Button title="Resend" tone="plain" disabled={busy} style={{ flex: 1 }}
+                    onPress={() => run(() => Invites.resend(i.id), 'Sent again.')} />
+            <Button title="Copy link" tone="plain" style={{ flex: 1 }}
+                    onPress={() => share(i)} />
+            <Button title="Revoke" tone="plain" disabled={busy} style={{ flex: 1 }}
+                    onPress={() => run(() => Invites.revoke(i.id), 'Invite revoked.')} />
           </View>
         </View>
       ))}
-      <Button
-        title={busy ? 'Working…' : 'Invite someone'}
-        tone="plain"
-        onPress={create}
-        disabled={busy}
-      />
+
       <Text style={s.muted}>
-        Anyone with the code can create an account in this household and see everything in
-        it, so send it directly. It works once and expires after a week.
+        The link creates exactly one account and then stops working. It expires after a week,
+        and anyone holding it can see everything in this household — so only send it to the
+        person it names.
       </Text>
       <ErrorNote error={error} />
     </View>

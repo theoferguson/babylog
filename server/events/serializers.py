@@ -1,3 +1,4 @@
+from django.conf import settings as django_settings
 from django.contrib.auth import password_validation
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -150,12 +151,18 @@ class InviteSerializer(serializers.ModelSerializer):
     created_by = serializers.CharField(source="created_by.username", read_only=True)
     accepted_by = serializers.CharField(source="accepted_by.username", read_only=True)
     is_usable = serializers.ReadOnlyField()
+    link = serializers.SerializerMethodField()
 
     class Meta:
         model = Invite
-        fields = ["id", "code", "created_by", "created_at", "expires_at",
-                  "accepted_by", "accepted_at", "is_usable"]
-        read_only_fields = fields
+        fields = ["id", "email", "link", "created_by", "created_at", "expires_at",
+                  "sent_at", "accepted_by", "accepted_at", "is_usable"]
+        read_only_fields = [f for f in fields if f != "email"]
+
+    def get_link(self, obj):
+        # Returned so the inviter can pass it on by hand if the email bounces.
+        # The raw code is deliberately not exposed on its own.
+        return obj.link(django_settings.PUBLIC_BASE_URL)
 
 
 class RegisterSerializer(serializers.Serializer):

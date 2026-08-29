@@ -3,6 +3,8 @@ from datetime import timedelta
 from pathlib import Path
 
 from django.contrib.auth.models import User
+from django.core import mail
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
@@ -612,16 +614,24 @@ class BabyLifecycleTests(APITestCase):
 
 
 class InviteTests(APITestCase):
-    """The only unauthenticated write in the API, so it gets the most scrutiny."""
+    """Registration is the only unauthenticated write in the API, so it gets the
+    most scrutiny here."""
 
     def setUp(self):
         self.user, self.hh, self.baby = make_household("theo-invite")
         self.client.force_authenticate(self.user)
+        mail.outbox = []
+        # DRF throttling is cache-backed and the cache outlives a single test,
+        # so without this the later tests here get 429s from earlier ones.
+        cache.clear()
 
-    def make_invite(self):
-        r = self.client.post("/api/invites/", {}, format="json")
+    def make_invite(self, email="partner@example.com"):
+        r = self.client.post("/api/invites/", {"email": email}, format="json")
         self.assertEqual(r.status_code, 201, r.json())
-        return r.json()["code"]
+        return r.json()
+
+    def code_of(self, body):
+        return body["link"].split("code=")[1]
 
     def register(self, **kw):
         self.client.force_authenticate(None)
@@ -629,30 +639,63 @@ class InviteTests(APITestCase):
         body.update(kw)
         return self.client.post("/api/auth/register/", body, format="json")
 
+    def test_inviting_sends_a_link_to_that_address(self):
+        body = self.make_invite("wife@example.com")
+        self.assertTrue(body["email_sent"])
+        self.assertEqual(len(mail.outbox), 1)
+        msg = mail.outbox[0]
+        self.assertEqual(msg.to, ["wife@example.com"])
+        self.assertIn(self.code_of(body), msg.body)
+        self.assertIn("/join?code=", msg.body)
+        # The raw code is never returned on its own, only inside the link.
+        self.assertNotIn("code", set(body) - {"link"})
+
+    def test_email_is_required_and_validated(self):
+        self.assertEqual(self.client.post("/api/invites/", {}, format="json").status_code, 400)
+        r = self.client.post("/api/invites/", {"email": "not-an-email"}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(Invite.objects.count(), 0)
+
     def test_invited_user_joins_the_same_household_and_sees_its_events(self):
         self.client.post("/api/events/", {
             "baby": str(self.baby.pk), "type": "diaper",
             "started_at": timezone.now().isoformat(),
             "payload": {"pee": "small"}}, format="json")
-        code = self.make_invite()
+        code = self.code_of(self.make_invite())
 
         r = self.register(code=code)
         self.assertEqual(r.status_code, 201, r.json())
-        token = r.json()["token"]
-
-        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {r.json()['token']}")
         self.assertEqual(self.client.get("/api/events/").json()["count"], 1)
         self.assertEqual(self.client.get("/api/babies/").json()["results"][0]["name"], "Henry")
 
-    def test_a_code_works_only_once(self):
-        code = self.make_invite()
+    def test_a_link_can_only_ever_create_one_account(self):
+        code = self.code_of(self.make_invite())
         self.assertEqual(self.register(code=code).status_code, 201)
-        r = self.register(code=code, username="third")
+        for name in ("third", "fourth"):
+            r = self.register(code=code, username=name)
+            self.assertEqual(r.status_code, 400)
+            self.assertFalse(User.objects.filter(username=name).exists())
+        self.assertEqual(Membership.objects.filter(household=self.hh).count(), 2)
+
+    def test_a_used_invite_cannot_be_resent(self):
+        body = self.make_invite()
+        self.assertEqual(self.register(code=self.code_of(body)).status_code, 201)
+        self.client.force_authenticate(self.user)
+        r = self.client.post(f"/api/invites/{body['id']}/resend/", {}, format="json")
         self.assertEqual(r.status_code, 400)
-        self.assertFalse(User.objects.filter(username="third").exists())
+
+    def test_resending_an_open_invite_sends_it_again(self):
+        body = self.make_invite()
+        mail.outbox = []
+        r = self.client.post(f"/api/invites/{body['id']}/resend/", {}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(self.code_of(body), mail.outbox[0].body)
 
     def test_expired_and_unknown_codes_are_indistinguishable(self):
-        stale = Invite.objects.create(household=self.hh, created_by=self.user)
+        stale = Invite.objects.create(household=self.hh, created_by=self.user,
+                                      email="stale@example.com")
         stale.expires_at = timezone.now() - timedelta(minutes=1)
         stale.save()
         expired = self.register(code=stale.code)
@@ -663,10 +706,19 @@ class InviteTests(APITestCase):
         self.assertEqual(str(expired.json()), str(unknown.json()))
 
     def test_weak_passwords_and_taken_usernames_are_rejected(self):
-        code = self.make_invite()
+        code = self.code_of(self.make_invite())
         self.assertEqual(self.register(code=code, password="12345678").status_code, 400)
-        self.assertEqual(self.register(code=code, username="theo-invite").status_code, 400)
+        self.assertEqual(self.register(code=code, username="THEO-INVITE").status_code, 400,
+                         "username collision must be case-insensitive")
         # ...and neither consumed the invite.
+        self.assertEqual(self.register(code=code).status_code, 201)
+
+    def test_repeated_attempts_are_throttled_but_not_instantly(self):
+        # A parent fumbling a password a few times must not be locked out, while
+        # someone grinding codes should be.
+        code = self.code_of(self.make_invite())
+        codes = [self.register(code="wrong", username=f"u{i}").status_code for i in range(6)]
+        self.assertNotIn(429, codes, "six bad attempts is normal human behaviour")
         self.assertEqual(self.register(code=code).status_code, 201)
 
     def test_registering_without_a_code_is_refused(self):
@@ -675,16 +727,16 @@ class InviteTests(APITestCase):
         self.assertEqual(User.objects.filter(username="partner").count(), 0)
 
     def test_invites_are_scoped_to_the_household(self):
-        code = self.make_invite()
-        other, other_hh, _ = make_household("invite-outsider")
+        body = self.make_invite()
+        other, _, _ = make_household("invite-outsider")
         self.client.force_authenticate(other)
         self.assertEqual(self.client.get("/api/invites/").json()["count"], 0)
-        # ...and cannot be revoked from outside.
-        mine = Invite.objects.get(code=code)
-        self.assertEqual(self.client.delete(f"/api/invites/{mine.pk}/").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/invites/{body['id']}/").status_code, 404)
+        self.assertEqual(
+            self.client.post(f"/api/invites/{body['id']}/resend/", {}, format="json").status_code,
+            404)
 
     def test_an_invite_can_be_revoked_before_use(self):
-        code = self.make_invite()
-        mine = Invite.objects.get(code=code)
-        self.assertEqual(self.client.delete(f"/api/invites/{mine.pk}/").status_code, 204)
-        self.assertEqual(self.register(code=code).status_code, 400)
+        body = self.make_invite()
+        self.assertEqual(self.client.delete(f"/api/invites/{body['id']}/").status_code, 204)
+        self.assertEqual(self.register(code=self.code_of(body)).status_code, 400)
