@@ -112,9 +112,19 @@ npx eas-cli submit --platform ios --latest
 ```
 
 The build prompts for your Apple ID and creates the signing certificate and
-provisioning profile for you. After the first `submit`, put the App Store Connect
-app id into `eas.json` under `submit.production.ios.ascAppId` so later submits
-skip the prompt.
+provisioning profile for you. `submit.production.ios.ascAppId` is already set to
+this app's App Store Connect id (6806627248), so submits no longer ask.
+
+App Store Connect: <https://appstoreconnect.apple.com/apps/6806627248/testflight/ios>
+The listing name there is `babylog (c8e5f7)` because `babylog` was taken; the
+home screen name comes from `expo.name` and is just `babylog`.
+
+**`react-native-reanimated` and `react-native-worklets` are pinned deliberately**
+to the SDK 57 set (4.5.1 / 0.10.1). npm otherwise resolves a newer reanimated
+that needs worklets 0.12.x, which fails the native build with
+`no member named 'executeSync' in worklets::WorkletRuntime`. Nothing catches this
+before a real iOS build: they are transitive deps, so `expo install --check` and
+`expo-doctor` both pass, and the web bundle compiles no native code.
 
 Then in App Store Connect → your app → TestFlight, add yourself and your partner
 as **internal testers**. Internal testing skips Beta App Review; they install
