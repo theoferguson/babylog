@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "babylog",
-    "slug": "babylog",
+    "slug": "baby-logging",
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "babylog",
@@ -42,7 +42,12 @@
       ]
     ],
     "extra": {
-      "apiUrl": "https://babylog-app.fly.dev"
-    }
+      "apiUrl": "https://babylog-app.fly.dev",
+      "router": {},
+      "eas": {
+        "projectId": "c3ffeff3-e9c3-465c-b892-a039823c13e5"
+      }
+    },
+    "owner": "ferguson-dev"
   }
 }
