@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { SessionProvider, useSession } from '../src/session';
+import '../src/outbox'; // registers the write queue with the API layer
 import { c } from '../src/theme';
 
 function Gate() {
@@ -41,6 +42,7 @@ function Gate() {
       <Stack.Screen name="log/pump" options={{ title: 'Pump' }} />
       <Stack.Screen name="import" options={{ title: 'Import' }} />
       <Stack.Screen name="event/[id]" options={{ title: 'Edit event' }} />
+      <Stack.Screen name="insights" options={{ title: 'Insights' }} />
     </Stack>
   );
 }

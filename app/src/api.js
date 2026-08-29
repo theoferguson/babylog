@@ -146,6 +146,14 @@ export const Babies = {
   create: (b) => api.post('/api/babies/', b),
 };
 
+// Writes that can wait go through the outbox; timer intents do not, because a
+// running timer must be visible on both phones and is meaningless offline.
+// `outbox` is injected at import time to avoid a require cycle.
+let outbox = null;
+export function useOutbox(mod) {
+  outbox = mod;
+}
+
 export const Events = {
   list: (params = {}) => {
     const q = new URLSearchParams(
@@ -156,9 +164,24 @@ export const Events = {
   get: (id) => api.get(`/api/events/${id}/`),
   latest: () => api.get('/api/events/latest/'),
   active: () => api.get('/api/events/active/'),
-  create: (e) => api.post('/api/events/', e),
-  update: (id, e) => api.patch(`/api/events/${id}/`, e),
-  remove: (id) => api.del(`/api/events/${id}/`),
+  // Client-generated id, so a queued create that flushes twice upserts rather
+  // than duplicating.
+  create: (e) => {
+    const body = { id: e.id || outbox?.newId(), ...e };
+    if (!outbox) return api.post('/api/events/', body);
+    return outbox
+      .writeThrough({ method: 'POST', path: '/api/events/', body, optimistic: body })
+      .then((r) => r.data);
+  },
+  update: (id, e) =>
+    outbox
+      ? outbox.writeThrough({ method: 'PATCH', path: `/api/events/${id}/`, body: e })
+          .then((r) => r.data)
+      : api.patch(`/api/events/${id}/`, e),
+  remove: (id) =>
+    outbox
+      ? outbox.writeThrough({ method: 'DELETE', path: `/api/events/${id}/` }).then((r) => r.data)
+      : api.del(`/api/events/${id}/`),
   // Timer intents. The server owns the accumulators -- never send computed
   // right_sec/left_sec, or two phones will clobber each other.
   tick: (id, action, side, at) =>

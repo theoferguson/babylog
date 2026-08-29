@@ -619,15 +619,62 @@ month navigation beyond the 7-day strip.
 
 This completes the "record / edit / add" requirement.
 
-### Phase 4 — Sync hardening
-The outbox, the persisted cache, conflict handling, an "offline / N pending"
-indicator. Deliberately *after* Phase 3 — build the UI against a live server
-first, then make it survive the subway.
+### Phase 4 — Sync hardening  ✅ **built (rescoped)**
 
-### Phase 5 — Insights
-Sleep totals per day/night split, feeds per day, average interval, diaper counts,
-weight curve. All read-only aggregation over the one event table; most are a
-single grouped query. Charts via `victory-native` (works on web too).
+**Rescoped from the original plan.** That version assumed a local-first client
+with a full sync engine. The nurse timer then went server-authoritative, because
+both phones must see it — which removed the hardest part of the problem. What was
+actually needed is much smaller:
+
+- **`src/cache.js`** — every read falls back to the last good response, so the
+  app renders on a dead connection. Screens are told the data is `stale` so they
+  can say so rather than quietly lying.
+- **`src/outbox.js`** — writes that can wait (instant events, edits, deletes) are
+  queued in AsyncStorage and flushed on next load. Client-generated UUIDs mean a
+  double flush upserts instead of duplicating.
+- **`src/OfflineBar.js`** — "N changes waiting to sync", tappable to retry.
+  Silence would let you believe a feed was saved when it is sitting in a queue.
+
+**Only a lost connection is queued.** A 4xx means the server looked at the
+request and refused it; retrying forever would never succeed *and* would wedge
+every later write behind it. Those are dropped and counted. Tested in
+`src/outbox.test.mjs`: offline preserves order, reconnect drains, a rejected row
+is dropped without blocking the rest, and a mid-flush disconnect keeps the
+remainder queued in order.
+
+**Not built:** offline *nursing*. Timer intents are meaningless without the
+server, so starting a feed offline currently just shows the error. The fix is a
+local timer that enqueues one complete event on Save — bounded work, but it
+means a feed started offline is not shared even after reconnecting.
+
+**Skipped:** CRDTs, a sync engine, NetInfo. Offline is inferred from request
+failure, which is the only thing that actually matters — can I reach the API.
+
+### Phase 5 — Insights  ✅ **built**
+
+`app/insights.js`, over 7 / 14 / 30 days. All aggregation is client-side in
+`src/stats.js` — a week is a few hundred rows, and a server endpoint would be a
+second place for the same arithmetic to be wrong.
+
+**Stat tiles** (a single headline number is not a chart): feeds/day, typical gap,
+nursing/day, diapers/day, night-feed share, pumped total.
+**Bar charts**, one series each: feeds, nursing minutes, diapers, pumped.
+
+Decisions worth keeping:
+- **Median, not mean, for the feed gap.** One four-hour overnight stretch drags an
+  average away from what the days actually look like.
+- **Intervals are start-to-start**, which is what "how often is he eating" means,
+  and they span midnight rather than resetting each day.
+- **Averages divide by days *with data*.** Otherwise importing an 11-day history
+  and viewing 30 days would silently show a third of the real rate.
+- **Day buckets use each event's own `tz`**, so a travel day is not smeared.
+- Charts are single-series, so **no legend and no cycled hues** — the title names
+  the series, the colour is the event type's own, already CVD-validated. Values
+  are labelled selectively (peak only), text uses text tokens rather than the
+  series colour, and the baseline is recessive.
+
+Validated against the real 224-row export: bucketed feed and diaper totals match
+the raw counts exactly, and interval count is n−1.
 
 ### Phase 6 — Predictions *(parked)*
 "Due for a nap in ~40 min."
@@ -745,6 +792,10 @@ timer, and the Live Activity is live on the device that owns the session.
   accumulators; clients poll every 3s while one is running.
 - **Home screen** = last-event summary (relative times) → 2x2 log buttons →
   today's timeline.
+- **Phase 4 rescoped**: cache + write outbox, no sync engine. Offline nursing
+  still to do.
+- **Insights are client-side**, median-based, and only average over days that
+  have data.
 - **iOS widgets + Live Activities** are Phase 8 — native WidgetKit work, App
   Group for data, `Text(style: .timer)` for ticking, App Intents for buttons.
 

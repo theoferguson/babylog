@@ -3,6 +3,9 @@ import { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Events } from '../src/api';
+import { cached } from '../src/cache';
+import OfflineBar from '../src/OfflineBar';
+import { flush } from '../src/outbox';
 import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../src/days';
 import { ago, summarize, timeOfDay } from '../src/format';
 import { useSession } from '../src/session';
@@ -28,26 +31,32 @@ export default function Home() {
   const [week, setWeek] = useState({});
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [stale, setStale] = useState(false);
 
   const load = useCallback(async () => {
     setBusy(true);
     try {
+      // Anything queued while offline goes up before we read, so the screen
+      // does not show a stale server view that omits your own writes.
+      await flush();
       const { since, until } = dayBounds(day, tz);
       // One week query feeds both the strip's density dots and the day list.
       const wk = dayBounds(addDays(todayKey(tz), -6), tz);
       const [l, d, w] = await Promise.all([
-        Events.latest(),
-        Events.list({ since: since.toISOString(), until: until.toISOString() }),
-        Events.list({ since: wk.since.toISOString(), limit: 500 }),
+        cached('latest', () => Events.latest()),
+        cached(`day:${day}`, () =>
+          Events.list({ since: since.toISOString(), until: until.toISOString() })),
+        cached('week', () => Events.list({ since: wk.since.toISOString(), limit: 500 })),
       ]);
-      setLatest(l || {});
-      setEvents(d.results || d || []);
+      setLatest(l.data || {});
+      setEvents(d.data.results || d.data || []);
       const counts = {};
-      for (const e of w.results || w || []) {
+      for (const e of w.data.results || w.data || []) {
         const k = dayKey(e.started_at, e.tz || tz);
         counts[k] = (counts[k] || 0) + 1;
       }
       setWeek(counts);
+      setStale(l.stale || d.stale || w.stale);
       setError(null);
     } catch (e) {
       setError(e);
@@ -100,6 +109,9 @@ export default function Home() {
           <Text style={s.h1}>{babies[0]?.name || 'babylog'}</Text>
         )}
         <View style={[s.row, { gap: 16 }]}>
+          <Pressable onPress={() => router.push('/insights')} accessibilityRole="button">
+            <Text style={s.muted}>Insights</Text>
+          </Pressable>
           <Pressable onPress={() => router.push('/import')} accessibilityRole="button">
             <Text style={s.muted}>Import</Text>
           </Pressable>
@@ -122,6 +134,7 @@ export default function Home() {
         <LogButton t={types.pump} onPress={() => router.push('/log/pump')} />
       </View>
 
+      <OfflineBar stale={stale} onFlushed={load} />
       <ErrorNote error={error} />
 
       <View style={{ marginTop: space * 1.5, gap: 10 }}>
