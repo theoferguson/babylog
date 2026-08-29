@@ -7,7 +7,9 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": false }
+      "ios": {
+        "simulator": false
+      }
     },
     "preview": {
       "distribution": "internal",
@@ -16,14 +18,12 @@
     "production": {
       "channel": "production",
       "autoIncrement": true,
-      "ios": { "resourceClass": "m-medium" }
+      "ios": {
+        "resourceClass": "m-medium"
+      }
     }
   },
   "submit": {
-    "production": {
-      "ios": {
-        "ascAppId": "REPLACE_AFTER_FIRST_SUBMIT"
-      }
-    }
+    "production": {}
   }
 }
