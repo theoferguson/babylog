@@ -9,7 +9,11 @@
     "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.theoferguson.babylog"
+      "bundleIdentifier": "com.theoferguson.babylog",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.theoferguson.babylog",

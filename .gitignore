@@ -19,3 +19,7 @@ app/web-build/
 
 # Web build copied in by the Docker web stage
 server/webroot/
+
+# EAS regenerates native projects on every build (CNG)
+app/ios/
+app/android/

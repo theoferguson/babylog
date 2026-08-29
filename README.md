@@ -94,6 +94,35 @@ Web build: `npx expo export --platform web`.
 | `src/Timeline.js` | the 24h day view |
 | `app/nurse.js` | the shared L/R timer |
 
+## iOS build (TestFlight)
+
+Builds run on EAS in the cloud — no Xcode needed locally.
+
+**Prerequisites (yours, one-time):**
+1. An Expo account — free, <https://expo.dev/signup>
+2. An Apple Developer Program membership — $99/yr, <https://developer.apple.com/programs/>.
+   Enrolment can take a day or two, so start it first.
+
+```sh
+cd app
+npx eas-cli login
+npx eas-cli build:configure          # links the project to your Expo account
+npx eas-cli build --platform ios --profile production
+npx eas-cli submit --platform ios --latest
+```
+
+The build prompts for your Apple ID and creates the signing certificate and
+provisioning profile for you. After the first `submit`, put the App Store Connect
+app id into `eas.json` under `submit.production.ios.ascAppId` so later submits
+skip the prompt.
+
+Then in App Store Connect → your app → TestFlight, add yourself and your partner
+as **internal testers**. Internal testing skips Beta App Review; they install
+TestFlight once and updates arrive automatically.
+
+Native builds talk to `expo.extra.apiUrl` (the absolute Fly URL). Only the web
+build is compiled `same-origin`.
+
 ## API
 
 | | |
