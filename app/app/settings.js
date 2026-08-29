@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import * as Updates from 'expo-updates';
 import { Babies, Invites, api } from '../src/api';
 import DateField from '../src/DateField';
 import { useSession } from '../src/session';
@@ -88,6 +89,7 @@ export default function Settings() {
       </View>
 
       <ErrorNote error={error} />
+      <BuildInfo />
       <Button title="Sign out" tone="plain" onPress={() => { signOut(); router.replace('/login'); }} />
     </ScrollView>
   );
@@ -350,6 +352,57 @@ function InviteSection() {
         person it names.
       </Text>
       <ErrorNote error={error} />
+    </View>
+  );
+}
+
+
+// Which JS this device is actually running. Without it, "did the update land?"
+// is guesswork on both ends -- a server-side fix can look like a client one.
+function BuildInfo() {
+  const [checking, setChecking] = useState(false);
+  const [note, setNote] = useState(null);
+
+  const id = Updates.updateId ? Updates.updateId.slice(0, 8) : 'built-in';
+  const when = Updates.createdAt
+    ? new Date(Updates.createdAt).toLocaleString([], {
+        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+      })
+    : null;
+
+  const check = async () => {
+    setChecking(true);
+    setNote(null);
+    try {
+      const r = await Updates.checkForUpdateAsync();
+      if (!r.isAvailable) {
+        setNote('Already on the newest version.');
+        return;
+      }
+      setNote('Downloading…');
+      await Updates.fetchUpdateAsync();
+      await Updates.reloadAsync(); // applies immediately instead of next launch
+    } catch (e) {
+      setNote(`Could not check: ${e.message}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <View style={{ gap: 6, marginTop: 6 }}>
+      <Text style={s.muted}>
+        Version {Updates.runtimeVersion || '—'} · update {id}
+        {when ? ` · ${when}` : ''}
+        {Updates.channel ? ` · ${Updates.channel}` : ''}
+      </Text>
+      <Button
+        title={checking ? 'Checking…' : 'Check for updates'}
+        tone="plain"
+        onPress={check}
+        disabled={checking}
+      />
+      {note ? <Text style={s.muted}>{note}</Text> : null}
     </View>
   );
 }
