@@ -43,6 +43,7 @@ function Gate() {
       <Stack.Screen name="import" options={{ title: 'Import' }} />
       <Stack.Screen name="event/[id]" options={{ title: 'Edit event' }} />
       <Stack.Screen name="insights" options={{ title: 'Insights' }} />
+      <Stack.Screen name="settings" options={{ title: 'Settings' }} />
     </Stack>
   );
 }

@@ -19,7 +19,7 @@ import { clock } from '../src/format';
 export default function Home() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { household, babies, babyId, setBabyId, signOut } = useSession();
+  const { household, babies, babyId, setBabyId } = useSession();
   const units = household?.units || 'metric';
   const tz = household?.timezone || 'UTC';
 
@@ -115,8 +115,8 @@ export default function Home() {
           <Pressable onPress={() => router.push('/import')} accessibilityRole="button">
             <Text style={s.muted}>Import</Text>
           </Pressable>
-          <Pressable onPress={signOut} accessibilityRole="button">
-            <Text style={s.muted}>Sign out</Text>
+          <Pressable onPress={() => router.push('/settings')} accessibilityRole="button">
+            <Text style={s.muted}>Settings</Text>
           </Pressable>
         </View>
       </View>

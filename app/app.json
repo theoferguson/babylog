@@ -38,7 +38,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#FDFBF9"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "apiUrl": "https://babylog-app.fly.dev",

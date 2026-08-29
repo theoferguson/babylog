@@ -585,8 +585,18 @@ the token in the keychain on device, home screen with last-event summary and the
 forms, and the 24h day timeline. Server side: `active/`, `timer/`, `finish/`
 with 27 tests.
 
-**Still to build:** the import review screen, baby/household setup UI, editing an
-event by tapping it, and the abandoned-timer nudge.
+**Also built:** the import review screen, tap-to-edit, and the **settings screen**
+— household name, units, home timezone, and add/edit/archive babies with a date
+of birth and colour.
+
+**Still to build:** the abandoned-timer nudge, a date picker for logging against
+a past *day*, and an invite flow (a second user still needs an account made in
+the admin).
+
+**A safeguard added with settings:** `Event.baby` cascades, so deleting a baby
+would have silently taken every feed, diaper and sleep with it. Deletion is now
+refused for any baby with history — the UI offers **Archive**, which hides them
+and keeps the record.
 
 **Done when:** both phones have it, your real Huckleberry history is imported
 through the review screen, you log a real day on it, and you'd rather open it

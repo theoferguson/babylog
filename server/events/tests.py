@@ -556,3 +556,56 @@ class IdempotencyEdgeTests(APITestCase):
         self.assertFalse(again.json()["in_progress"])
         self.assertIsNotNone(Event.objects.get(pk=ev).ended_at)
         self.assertEqual(self.client.get("/api/events/active/").json()["events"], [])
+
+
+class BabyLifecycleTests(APITestCase):
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-baby")
+        self.client.force_authenticate(self.user)
+
+    def test_can_add_and_edit_a_baby(self):
+        r = self.client.post("/api/babies/", {"name": "Second", "dob": "2026-08-01",
+                                              "color": "#9CB981"}, format="json")
+        self.assertEqual(r.status_code, 201, r.json())
+        bid = r.json()["id"]
+        r = self.client.patch(f"/api/babies/{bid}/", {"name": "Renamed"}, format="json")
+        self.assertEqual(r.json()["name"], "Renamed")
+
+    def test_archiving_keeps_the_events(self):
+        self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "diaper",
+            "started_at": timezone.now().isoformat(),
+            "payload": {"pee": "small"}}, format="json")
+        r = self.client.patch(f"/api/babies/{self.baby.pk}/", {"archived": True},
+                              format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(Event.objects.count(), 1)
+
+    def test_deleting_a_baby_with_history_is_refused(self):
+        self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "diaper",
+            "started_at": timezone.now().isoformat(),
+            "payload": {"pee": "small"}}, format="json")
+        r = self.client.delete(f"/api/babies/{self.baby.pk}/")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("archive", str(r.json()).lower())
+        self.assertEqual(Event.objects.count(), 1)  # history intact
+
+    def test_a_baby_with_no_history_can_be_deleted(self):
+        r = self.client.post("/api/babies/", {"name": "Mistake"}, format="json")
+        self.assertEqual(self.client.delete(f"/api/babies/{r.json()['id']}/").status_code, 204)
+
+    def test_household_settings_can_be_changed(self):
+        r = self.client.patch(f"/api/households/{self.hh.pk}/",
+                              {"units": "imperial", "timezone": "Europe/Lisbon",
+                               "name": "Ferguson"}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["units"], "imperial")
+        self.assertEqual(r.json()["timezone"], "Europe/Lisbon")
+
+    def test_cannot_touch_another_households_baby(self):
+        other, _, _ = make_household("baby-outsider")
+        self.client.force_authenticate(other)
+        self.assertEqual(
+            self.client.patch(f"/api/babies/{self.baby.pk}/", {"name": "x"},
+                              format="json").status_code, 404)

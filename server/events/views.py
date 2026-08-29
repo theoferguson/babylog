@@ -43,6 +43,15 @@ class BabyViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(household=current_household(self.request))
 
+    def perform_destroy(self, instance):
+        # Event.baby cascades. Deleting a baby who has history would silently
+        # take every feed, diaper and sleep with it, which is never what the
+        # button meant. Archiving hides them and keeps the record.
+        if instance.events.exists():
+            raise ValidationError(
+                "this baby has logged events -- archive instead of deleting")
+        instance.delete()
+
 
 class EventViewSet(viewsets.ModelViewSet):
     serializer_class = EventSerializer

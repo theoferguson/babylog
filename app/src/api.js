@@ -148,6 +148,8 @@ export const Households = {
 export const Babies = {
   list: () => api.get('/api/babies/'),
   create: (b) => api.post('/api/babies/', b),
+  update: (id, b) => api.patch(`/api/babies/${id}/`, b),
+  remove: (id) => api.del(`/api/babies/${id}/`),
 };
 
 // Writes that can wait go through the outbox; timer intents do not, because a
