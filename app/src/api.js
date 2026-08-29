@@ -89,6 +89,22 @@ export async function login(username, password) {
   return t;
 }
 
+export const Invites = {
+  list: () => api.get('/api/invites/'),
+  create: () => api.post('/api/invites/', {}),
+  revoke: (id) => api.del(`/api/invites/${id}/`),
+};
+
+export async function register({ code, username, password, email }) {
+  const { token: t } = await request('/api/auth/register/', {
+    method: 'POST',
+    body: { code: code.trim(), username: username.trim(), password, email },
+  });
+  token = t;
+  await setItem(TOKEN_KEY, t);
+  return t;
+}
+
 export async function logout() {
   token = null;
   await removeItem(TOKEN_KEY);

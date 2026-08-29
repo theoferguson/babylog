@@ -2,6 +2,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, ScrollView, Text, TextInput, View } from 'react-native';
 import { Events } from '../../src/api';
+import DateTimeField from '../../src/DateTimeField';
 import { Choice } from '../../src/InstantForm';
 import { toMl, volume } from '../../src/format';
 import { useSession } from '../../src/session';
@@ -112,6 +113,7 @@ export default function EditEvent() {
             />
           ))}
         </View>
+        <DateTimeField value={startedAt} onChange={setStartedAt} />
         {event.tz && event.tz !== household?.timezone ? (
           <Text style={s.muted}>Recorded in {event.tz}</Text>
         ) : null}

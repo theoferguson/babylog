@@ -8,7 +8,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from .models import Baby, Event, Household, Membership
+from .models import Baby, Event, Household, Invite, Membership
 
 # Synthetic fixture, not real data. See events/testdata/README.md.
 CSV = Path(__file__).resolve().parent / "testdata" / "huckleberry-sample.csv"
@@ -609,3 +609,82 @@ class BabyLifecycleTests(APITestCase):
         self.assertEqual(
             self.client.patch(f"/api/babies/{self.baby.pk}/", {"name": "x"},
                               format="json").status_code, 404)
+
+
+class InviteTests(APITestCase):
+    """The only unauthenticated write in the API, so it gets the most scrutiny."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-invite")
+        self.client.force_authenticate(self.user)
+
+    def make_invite(self):
+        r = self.client.post("/api/invites/", {}, format="json")
+        self.assertEqual(r.status_code, 201, r.json())
+        return r.json()["code"]
+
+    def register(self, **kw):
+        self.client.force_authenticate(None)
+        body = {"username": "partner", "password": "a-good-long-passphrase-42"}
+        body.update(kw)
+        return self.client.post("/api/auth/register/", body, format="json")
+
+    def test_invited_user_joins_the_same_household_and_sees_its_events(self):
+        self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "diaper",
+            "started_at": timezone.now().isoformat(),
+            "payload": {"pee": "small"}}, format="json")
+        code = self.make_invite()
+
+        r = self.register(code=code)
+        self.assertEqual(r.status_code, 201, r.json())
+        token = r.json()["token"]
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
+        self.assertEqual(self.client.get("/api/events/").json()["count"], 1)
+        self.assertEqual(self.client.get("/api/babies/").json()["results"][0]["name"], "Henry")
+
+    def test_a_code_works_only_once(self):
+        code = self.make_invite()
+        self.assertEqual(self.register(code=code).status_code, 201)
+        r = self.register(code=code, username="third")
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(User.objects.filter(username="third").exists())
+
+    def test_expired_and_unknown_codes_are_indistinguishable(self):
+        stale = Invite.objects.create(household=self.hh, created_by=self.user)
+        stale.expires_at = timezone.now() - timedelta(minutes=1)
+        stale.save()
+        expired = self.register(code=stale.code)
+        unknown = self.register(code="totally-made-up", username="other")
+        self.assertEqual(expired.status_code, 400)
+        self.assertEqual(unknown.status_code, 400)
+        # Same wording, so probing cannot tell a real code from a fake one.
+        self.assertEqual(str(expired.json()), str(unknown.json()))
+
+    def test_weak_passwords_and_taken_usernames_are_rejected(self):
+        code = self.make_invite()
+        self.assertEqual(self.register(code=code, password="12345678").status_code, 400)
+        self.assertEqual(self.register(code=code, username="theo-invite").status_code, 400)
+        # ...and neither consumed the invite.
+        self.assertEqual(self.register(code=code).status_code, 201)
+
+    def test_registering_without_a_code_is_refused(self):
+        r = self.register()
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(User.objects.filter(username="partner").count(), 0)
+
+    def test_invites_are_scoped_to_the_household(self):
+        code = self.make_invite()
+        other, other_hh, _ = make_household("invite-outsider")
+        self.client.force_authenticate(other)
+        self.assertEqual(self.client.get("/api/invites/").json()["count"], 0)
+        # ...and cannot be revoked from outside.
+        mine = Invite.objects.get(code=code)
+        self.assertEqual(self.client.delete(f"/api/invites/{mine.pk}/").status_code, 404)
+
+    def test_an_invite_can_be_revoked_before_use(self):
+        code = self.make_invite()
+        mine = Invite.objects.get(code=code)
+        self.assertEqual(self.client.delete(f"/api/invites/{mine.pk}/").status_code, 204)
+        self.assertEqual(self.register(code=code).status_code, 400)

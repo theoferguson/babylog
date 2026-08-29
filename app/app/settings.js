@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { Babies, Households, api } from '../src/api';
+import { Alert, Platform, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { Babies, Invites, api } from '../src/api';
 import DateField from '../src/DateField';
 import { useSession } from '../src/session';
 import { c, space } from '../src/theme';
@@ -82,9 +82,9 @@ export default function Settings() {
           </View>
         ))}
         <Text style={s.muted}>
-          Everyone here sees the same events and can start or stop the same timer. Adding
-          someone needs an account created in the admin for now.
+          Everyone here sees the same events and can start or stop the same timer.
         </Text>
+        <InviteSection />
       </View>
 
       <ErrorNote error={error} />
@@ -246,6 +246,100 @@ function BabyCard({ baby, isNew, busy, onSave, onArchive, onDelete, onCancel }) 
           )}
         </>
       ) : null}
+    </View>
+  );
+}
+
+
+function InviteSection() {
+  const [invites, setInvites] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    try {
+      const r = await Invites.list();
+      setInvites((r.results || r || []).filter((i) => i.is_usable));
+    } catch (e) {
+      setError(e);
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const create = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await Invites.create();
+      await load();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (id) => {
+    setBusy(true);
+    try {
+      await Invites.revoke(id);
+      await load();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const share = async (code) => {
+    const message =
+      `Join our babylog household.\n\n` +
+      `1. Open https://babylog-app.fly.dev\n` +
+      `2. Tap "I have an invite code"\n` +
+      `3. Code: ${code}`;
+    if (Platform.OS === 'web') {
+      try {
+        await navigator.clipboard.writeText(message);
+        window.alert('Invite copied to the clipboard.');
+      } catch {
+        window.prompt('Copy this invite:', message);
+      }
+      return;
+    }
+    await Share.share({ message });
+  };
+
+  return (
+    <View style={{ gap: 10, marginTop: 6 }}>
+      {(invites || []).map((i) => (
+        <View key={i.id} style={[s.card, { gap: 8 }]}>
+          <Text style={s.muted}>Invite code — single use</Text>
+          <Text selectable style={{ fontSize: 15, fontWeight: '700', color: c.text }}>
+            {i.code}
+          </Text>
+          <Text style={s.muted}>
+            Expires {new Date(i.expires_at).toLocaleDateString([], {
+              month: 'short', day: 'numeric',
+            })}
+          </Text>
+          <View style={[s.row, { gap: 10 }]}>
+            <Button title="Share" onPress={() => share(i.code)} style={{ flex: 1 }} />
+            <Button title="Revoke" tone="plain" onPress={() => revoke(i.id)}
+                    disabled={busy} style={{ flex: 1 }} />
+          </View>
+        </View>
+      ))}
+      <Button
+        title={busy ? 'Working…' : 'Invite someone'}
+        tone="plain"
+        onPress={create}
+        disabled={busy}
+      />
+      <Text style={s.muted}>
+        Anyone with the code can create an account in this household and see everything in
+        it, so send it directly. It works once and expires after a week.
+      </Text>
+      <ErrorNote error={error} />
     </View>
   );
 }

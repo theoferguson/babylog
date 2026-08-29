@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Events, deviceTz } from '../src/api';
+import DateTimeField from './DateTimeField';
 import { useSession } from '../src/session';
 import { c, space } from '../src/theme';
 import { Button, ErrorNote, s } from '../src/ui';
@@ -12,6 +13,7 @@ export default function InstantForm({ type, needsBaby = true, children, build, v
   const router = useRouter();
   const { babyId } = useSession();
   const [at, setAt] = useState(new Date());
+  const [pickDay, setPickDay] = useState(false);
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -36,6 +38,7 @@ export default function InstantForm({ type, needsBaby = true, children, build, v
   };
 
   const shift = (mins) => setAt((d) => new Date(d.getTime() + mins * 60000));
+  const sameDay = (d) => d.toDateString() === new Date().toDateString();
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
@@ -45,7 +48,9 @@ export default function InstantForm({ type, needsBaby = true, children, build, v
         <Text style={s.h2}>When</Text>
         <View style={[s.row, { gap: 8, flexWrap: 'wrap' }]}>
           <Text style={[s.body, { fontWeight: '700', minWidth: 76 }]}>
-            {at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+            {sameDay(at) ? at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+                         : at.toLocaleString([], { month: 'short', day: 'numeric',
+                                                   hour: 'numeric', minute: '2-digit' })}
           </Text>
           {[-30, -15, -5].map((m) => (
             <Pressable
@@ -71,7 +76,17 @@ export default function InstantForm({ type, needsBaby = true, children, build, v
           >
             <Text style={{ color: c.accent, fontWeight: '600' }}>now</Text>
           </Pressable>
+          <Pressable
+            onPress={() => setPickDay((v) => !v)}
+            accessibilityRole="button"
+            style={{ paddingHorizontal: 12, paddingVertical: 8 }}
+          >
+            <Text style={{ color: c.accent, fontWeight: '600' }}>
+              {pickDay ? 'done' : 'another day'}
+            </Text>
+          </Pressable>
         </View>
+        {pickDay ? <DateTimeField value={at} onChange={setAt} /> : null}
       </View>
 
       <TextInput

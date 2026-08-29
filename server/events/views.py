@@ -5,15 +5,20 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import (action, api_view, permission_classes,
+                                       throttle_classes)
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .importers.huckleberry import parse as parse_huckleberry
-from .models import Baby, Event, Household
+from rest_framework.authtoken.models import Token
+from rest_framework.permissions import AllowAny
+from rest_framework.throttling import AnonRateThrottle
+
+from .models import Baby, Event, Household, Invite, Membership
 from .serializers import (BabySerializer, EventSerializer, HouseholdSerializer,
-                          validate_payload)
+                          InviteSerializer, RegisterSerializer, validate_payload)
 
 MAX_IMPORT_BYTES = 5 * 1024 * 1024
 
@@ -376,3 +381,39 @@ def import_commit(request):
         {"saved": len(to_save), "skipped": skipped},
         status=status.HTTP_201_CREATED if to_save else status.HTTP_400_BAD_REQUEST,
     )
+
+
+class InviteViewSet(viewsets.ModelViewSet):
+    """Invites for the caller's household. Any member can invite; with two
+    parents that is the right level, and the household is the blast radius."""
+
+    serializer_class = InviteSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "post", "delete", "head", "options"]
+
+    def get_queryset(self):
+        return Invite.objects.filter(household__membership__user=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        invite = Invite.objects.create(
+            household=current_household(request), created_by=request.user
+        )
+        return Response(self.get_serializer(invite).data, status=status.HTTP_201_CREATED)
+
+
+class RegisterThrottle(AnonRateThrottle):
+    # Codes are 24 random bytes, so guessing is hopeless; this just stops anyone
+    # hammering the one unauthenticated write in the API.
+    rate = "10/hour"
+
+
+@api_view(["POST"])
+@permission_classes([AllowAny])
+@throttle_classes([RegisterThrottle])
+def register(request):
+    ser = RegisterSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    user = ser.save()
+    token, _ = Token.objects.get_or_create(user=user)
+    return Response({"token": token.key, "username": user.username},
+                    status=status.HTTP_201_CREATED)

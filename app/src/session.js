@@ -1,5 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { Babies, Households, loadToken, login as apiLogin, logout as apiLogout } from './api';
+import {
+  Babies, Households, loadToken, login as apiLogin, logout as apiLogout,
+  register as apiRegister,
+} from './api';
 
 const Ctx = createContext(null);
 export const useSession = () => useContext(Ctx);
@@ -43,6 +46,12 @@ export function SessionProvider({ children }) {
     setSignedIn(true);
   };
 
+  const signUp = async (payload) => {
+    await apiRegister(payload);
+    await refresh();
+    setSignedIn(true);
+  };
+
   const signOut = async () => {
     await apiLogout();
     setSignedIn(false);
@@ -53,7 +62,7 @@ export function SessionProvider({ children }) {
 
   return (
     <Ctx.Provider
-      value={{ ready, signedIn, household, babies, babyId, setBabyId, signIn, signOut, refresh }}
+      value={{ ready, signedIn, household, babies, babyId, setBabyId, signIn, signUp, signOut, refresh }}
     >
       {children}
     </Ctx.Provider>

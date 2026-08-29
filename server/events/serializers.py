@@ -1,7 +1,10 @@
+from django.contrib.auth import password_validation
 from django.contrib.auth.models import User
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Baby, Event, Household, Membership
+from .models import Baby, Event, Household, Invite, Membership
 
 # Per-type payload rules. A dict, not a schema framework -- adding a type is a
 # line here plus a form in the app.
@@ -141,3 +144,63 @@ class EventSerializer(serializers.ModelSerializer):
         if baby is not None and baby.household_id != household.id:
             raise serializers.ValidationError("baby belongs to another household")
         return attrs
+
+
+class InviteSerializer(serializers.ModelSerializer):
+    created_by = serializers.CharField(source="created_by.username", read_only=True)
+    accepted_by = serializers.CharField(source="accepted_by.username", read_only=True)
+    is_usable = serializers.ReadOnlyField()
+
+    class Meta:
+        model = Invite
+        fields = ["id", "code", "created_by", "created_at", "expires_at",
+                  "accepted_by", "accepted_at", "is_usable"]
+        read_only_fields = fields
+
+
+class RegisterSerializer(serializers.Serializer):
+    """Account creation, gated by a single-use invite code.
+
+    This is the only unauthenticated write in the API, so it validates hard: the
+    code must exist, be unused and unexpired; the username must be free; and the
+    password goes through Django's validators rather than a length check.
+    """
+
+    code = serializers.CharField()
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+
+    def validate_username(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("choose a username")
+        if User.objects.filter(username__iexact=value).exists():
+            raise serializers.ValidationError("that username is taken")
+        return value
+
+    def validate(self, attrs):
+        invite = Invite.objects.filter(code=attrs["code"]).first()
+        # One message for missing, used and expired alike: distinguishing them
+        # would tell someone probing codes which guesses were real.
+        if invite is None or not invite.is_usable:
+            raise serializers.ValidationError({"code": "that invite is not valid"})
+        password_validation.validate_password(attrs["password"])
+        attrs["invite"] = invite
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated):
+        invite = Invite.objects.select_for_update().get(pk=validated["invite"].pk)
+        if not invite.is_usable:  # re-checked under the lock: codes are single-use
+            raise serializers.ValidationError({"code": "that invite is not valid"})
+        user = User.objects.create_user(
+            username=validated["username"],
+            password=validated["password"],
+            email=validated.get("email", ""),
+        )
+        Membership.objects.create(user=user, household=invite.household)
+        invite.accepted_by = user
+        invite.accepted_at = timezone.now()
+        invite.save(update_fields=["accepted_by", "accepted_at"])
+        return user

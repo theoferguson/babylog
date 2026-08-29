@@ -1,7 +1,10 @@
+import secrets
 import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 ML_PER_OZ = 29.5735295625
 G_PER_LB = 453.59237
@@ -38,6 +41,51 @@ class Membership(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["user", "household"], name="uniq_membership")
         ]
+
+
+def new_invite_code():
+    # 24 random bytes: far beyond guessing, and the code is the only credential
+    # standing between a stranger and this household's data.
+    return secrets.token_urlsafe(24)
+
+
+class Invite(models.Model):
+    """A single-use code that lets someone create an account in this household.
+
+    Exists so a second parent does not need the Django admin. The code is the
+    only credential, so it is long, random, single-use and expires.
+    """
+
+    LIFETIME = timedelta(days=7)
+
+    code = models.CharField(max_length=64, unique=True, default=new_invite_code)
+    household = models.ForeignKey(Household, on_delete=models.CASCADE, related_name="invites")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True,
+        related_name="invites_sent",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="invite_used",
+    )
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + self.LIFETIME
+        super().save(*args, **kwargs)
+
+    @property
+    def is_usable(self):
+        return self.accepted_at is None and self.expires_at > timezone.now()
+
+    def __str__(self):
+        return f"invite to {self.household} ({'used' if self.accepted_at else 'open'})"
 
 
 class Baby(models.Model):

@@ -128,6 +128,8 @@ build is compiled `same-origin`.
 | | |
 |---|---|
 | `POST /api/auth/token/` | username + password → token |
+| `POST /api/auth/register/` | join a household with an invite code (public, throttled) |
+| `/api/invites/` | mint, list and revoke single-use invite codes |
 | `GET/POST /api/events/` | filters: `baby`, `type`, `since`, `until` |
 | `GET /api/events/latest/` | one row per type, for the home screen |
 | `GET /api/events/active/` | running timers, polled by every device |

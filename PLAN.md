@@ -589,9 +589,26 @@ with 27 tests.
 — household name, units, home timezone, and add/edit/archive babies with a date
 of birth and colour.
 
-**Still to build:** the abandoned-timer nudge, a date picker for logging against
-a past *day*, and an invite flow (a second user still needs an account made in
-the admin).
+**Backdating is complete.** The instant forms and the event editor keep the quick
+−5/−15/−30m chips as the fast path and add an "another day" toggle with a real
+date and time picker — the browser's own inputs on web, the platform picker on
+iOS. Future times are clamped, since an event cannot have happened yet.
+
+**Invites are built**, so a second parent no longer needs the Django admin.
+Settings → Invite someone mints a single-use code; the login screen has "I have
+an invite code". `POST /api/auth/register/` is the **only unauthenticated write
+in the API**, so it is the most defended thing here:
+
+- the code is 24 random bytes, single use, and expires after a week
+- missing, used and expired codes return the **same** message, so probing cannot
+  tell a real code from a fake one
+- the code is re-checked under `select_for_update` inside the transaction, so two
+  simultaneous redemptions cannot both win
+- passwords go through Django's validators, not a length check
+- the endpoint is throttled to 10/hour per anonymous client
+- a rejected registration never consumes the invite
+
+**Still to build:** the abandoned-timer nudge.
 
 **A safeguard added with settings:** `Event.baby` cascades, so deleting a baby
 would have silently taken every feed, diaper and sleep with it. Deletion is now
