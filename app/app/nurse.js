@@ -61,11 +61,22 @@ export default function Nurse() {
   // Once we are driving locally we stay there, so a late poll cannot yank the
   // screen back and lose taps made while offline.
   const view = offlineState || (remote ? fromEvent(remote) : null);
-  const now = useNow(!!view?.running_side) + skewMs;
+  // Server skew corrects a server-issued running_since. A local timer's
+  // running_since came from this device's clock, so adding skew would make it
+  // start at zero (or jump) for the length of the drift.
+  const now = useNow(!!view?.running_side) + (offlineState ? 0 : skewMs);
 
   useEffect(() => {
     if (view && !notesDirty) setNotes(view.notes || '');
   }, [view, notesDirty]);
+
+  // Offline notes live only in React state otherwise, so an app kill mid-feed
+  // would restore the timer with the notes blank.
+  useEffect(() => {
+    if (!offlineState || !notesDirty) return;
+    if (offlineState.notes === notes) return;
+    local.save({ ...offlineState, notes });
+  }, [notes, notesDirty, offlineState]);
 
   const goLocal = async (next) => {
     setOfflineState(next);
@@ -76,6 +87,7 @@ export default function Nurse() {
     setBusy(true);
     setError(null);
     const at = new Date();
+    let bootstrapped = null;
     try {
       if (offlineState) {
         const next = local.tap(offlineState, side, at);
@@ -99,7 +111,9 @@ export default function Nurse() {
         await refresh();
         return;
       }
-      const created = await Events.create({
+      // createDirect, not create: a queued create would leave an in_progress
+      // event with nothing to finish it.
+      const created = await Events.createDirect({
         baby: babyId,
         type: 'feed',
         started_at: at.toISOString(),
@@ -107,16 +121,28 @@ export default function Nurse() {
         in_progress: true,
         payload: { method: 'breast' },
       });
+      bootstrapped = created.id;
       await Events.tick(created.id, 'start', side, at);
       await refresh();
     } catch (e) {
       if (!isOffline(e)) {
         setError(e);
-      } else {
-        // Drop to a local timer rather than losing the tap.
-        const base = view || local.empty(at);
-        await goLocal(local.tap(base, side, at));
+        return;
       }
+      // Drop to a local timer rather than losing the tap. If the feed already
+      // exists on the server, the tap that discovered the outage must still be
+      // queued -- otherwise the server banks the whole stretch to the wrong side.
+      const base = bootstrapped
+        ? { ...local.empty(at), remoteId: bootstrapped }
+        : view || local.empty(at);
+      if (base.remoteId) {
+        await enqueue({
+          method: 'POST',
+          path: `/api/events/${base.remoteId}/timer/`,
+          body: sideIntent(base, side, at),
+        });
+      }
+      await goLocal(local.tap(base, side, at));
     } finally {
       setBusy(false);
     }
@@ -160,8 +186,21 @@ export default function Nurse() {
       await refresh();
       router.back();
     } catch (e) {
-      setError(e);
-      setBusy(false);
+      if (!isOffline(e)) {
+        setError(e);
+        setBusy(false);
+        return;
+      }
+      // The connection went while saving. Queue the finish with the time the
+      // button was pressed, so the feed does not stay in progress forever.
+      await enqueue({
+        method: 'POST',
+        path: `/api/events/${remote.id}/finish/`,
+        body: { at: at.toISOString() },
+      });
+      await local.clear();
+      setOfflineState(null);
+      router.back();
     }
   };
 
@@ -183,12 +222,11 @@ export default function Nurse() {
         setBusy(false);
       }
     };
-    const msg = 'Discard this feed? It will not be saved.';
     if (Platform.OS === 'web') {
-      if (window.confirm(msg)) go();
+      if (window.confirm('Discard this feed? It will not be saved.')) go();
       return;
     }
-    Alert.alert('Discard this feed?', msg, [
+    Alert.alert('Discard this feed?', 'It will not be saved.', [
       { text: 'Keep', style: 'cancel' },
       { text: 'Discard', style: 'destructive', onPress: go },
     ]);

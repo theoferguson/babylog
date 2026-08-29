@@ -116,6 +116,12 @@ class EventSerializer(serializers.ModelSerializer):
         read_only_fields = ["created_by", "updated_at"]
 
     def validate(self, attrs):
+        # The id is settable only at creation. Letting it through on update makes
+        # Django UPDATE a row that no longer matches and then INSERT a copy --
+        # a silent duplicate, not an error.
+        if self.instance is not None:
+            attrs.pop("id", None)
+
         kind = attrs.get("type", getattr(self.instance, "type", None))
         payload = attrs.get("payload", getattr(self.instance, "payload", {}) or {})
         validate_payload(kind, payload)

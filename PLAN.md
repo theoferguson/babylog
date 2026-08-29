@@ -658,12 +658,31 @@ A feed that goes local **stays local until saved**, even if the connection retur
 mid-feed. Promoting it halfway would mean reconciling against a partner who may
 have been tapping too. The cost: a feed started offline is not shared live.
 
-**A bug this surfaced:** `Event.id` is `editable=False`, so DRF was silently
-marking it read-only and *discarding* client-supplied ids. Every claim about the
-outbox being idempotent was false — a double flush would have created duplicates.
-`id` is now explicitly writable and create is idempotent: replaying a queued write
-upserts, a replay against another household is rejected, and a replay of an event
-deleted in the meantime does not resurrect it.
+**Bugs this surfaced**, all found by review after the feature "worked":
+
+- `Event.id` is `editable=False`, so DRF silently marked it read-only and
+  *discarded* client-supplied ids. Every claim about the outbox being idempotent
+  was false — a double flush would have duplicated.
+- Making `id` writable then made it writable on **update** too, where a changed
+  pk makes Django UPDATE nothing and INSERT a copy. A `PATCH` carrying a
+  different id returned 200 and silently left two rows. `id` is now accepted only
+  at creation.
+- A malformed `id` hit the queryset before any serializer and escaped as a **500**.
+- A queued "start a timer" write flushing *after* that timer was finished tripped
+  the `in_progress_events_have_no_end` constraint — another 500. It is now a no-op,
+  like the deleted case.
+- The offline bootstrap routed through the outbox, which **queues** rather than
+  throwing. One offline tap therefore enqueued an `in_progress` event nothing
+  would ever finish *and* fell through to a local timer — a duplicate feed plus a
+  phantom one running forever. Bootstrapping now uses a direct write that fails
+  loudly.
+- The tap that *discovered* the outage was applied locally but never queued, so
+  the server banked the whole stretch to whichever side was running when the
+  connection died. The screen and the saved feed disagreed.
+- `save()` had no offline path unless a tap had already failed, so losing the
+  connection and then pressing Save left the feed in progress on the server.
+- Server clock skew was being added to a device-clock timer, making an offline
+  timer start at zero or jump by the drift.
 
 **Skipped:** CRDTs, a sync engine, NetInfo. Offline is inferred from request
 failure, which is the only thing that actually matters — can I reach the API.

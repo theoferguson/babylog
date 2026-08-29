@@ -513,3 +513,46 @@ class OfflineNursingTests(APITestCase):
         self.assertEqual(again.status_code, 200)
         self.assertIsNotNone(Event.objects.get(pk=body["id"]).deleted_at)
         self.assertEqual(self.client.get("/api/events/").json()["count"], 0)
+
+
+class IdempotencyEdgeTests(APITestCase):
+    """Replayed and malformed writes must not corrupt data or 500."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-idem")
+        self.client.force_authenticate(self.user)
+        self.now = timezone.now()
+
+    def make(self, ev_id, **kw):
+        body = {"id": ev_id, "baby": str(self.baby.pk), "type": "diaper",
+                "started_at": self.now.isoformat(), "payload": {"pee": "small"}}
+        body.update(kw)
+        return self.client.post("/api/events/", body, format="json")
+
+    def test_id_cannot_be_changed_by_update(self):
+        a = "11111111-1111-4000-8000-000000000001"
+        b = "22222222-2222-4000-8000-000000000002"
+        self.make(a)
+        r = self.client.patch(f"/api/events/{a}/", {"id": b, "payload": {"pee": "large"}},
+                              format="json")
+        self.assertEqual(r.status_code, 200)
+        # A changed pk would UPDATE nothing and then INSERT a copy.
+        self.assertEqual(Event.objects.count(), 1)
+        self.assertEqual(Event.objects.get().payload["pee"], "large")
+        self.assertFalse(Event.objects.filter(pk=b).exists())
+
+    def test_malformed_id_is_a_400_not_a_500(self):
+        r = self.make("not-a-uuid")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("id", r.json())
+
+    def test_replayed_start_after_finish_is_a_no_op(self):
+        ev = "33333333-3333-4000-8000-000000000003"
+        self.make(ev, type="feed", in_progress=True, payload={"method": "breast"})
+        self.client.post(f"/api/events/{ev}/finish/", {}, format="json")
+        # The queued bootstrap write flushes late; it must not revive the timer.
+        again = self.make(ev, type="feed", in_progress=True, payload={"method": "breast"})
+        self.assertEqual(again.status_code, 200)
+        self.assertFalse(again.json()["in_progress"])
+        self.assertIsNotNone(Event.objects.get(pk=ev).ended_at)
+        self.assertEqual(self.client.get("/api/events/active/").json()["events"], [])

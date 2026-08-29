@@ -168,6 +168,12 @@ export const Events = {
   get: (id) => api.get(`/api/events/${id}/`),
   latest: () => api.get('/api/events/latest/'),
   active: () => api.get('/api/events/active/'),
+  // Bootstrapping a shared timer must NOT be queued: if it were, an offline tap
+  // would silently enqueue an in_progress event that nothing ever finishes, and
+  // the screen would still fall back to a local timer -- producing a duplicate
+  // feed and a phantom one that runs forever.
+  createDirect: (e) => api.post('/api/events/', { id: e.id || outbox?.newId(), ...e }),
+
   // Client-generated id, so a queued create that flushes twice upserts rather
   // than duplicating.
   create: (e) => {

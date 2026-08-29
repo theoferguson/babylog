@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 
 from django.db import transaction
@@ -70,6 +71,12 @@ class EventViewSet(viewsets.ModelViewSet):
         """Idempotent create, so a queued offline write can flush twice safely."""
         given = request.data.get("id")
         if given:
+            try:
+                given = uuid.UUID(str(given))
+            except (ValueError, AttributeError, TypeError):
+                # Raised before any serializer runs, so it would otherwise
+                # surface as a 500 from the queryset rather than a 400.
+                raise ValidationError({"id": "must be a UUID"})
             existing = Event.objects.filter(pk=given).first()
             if existing is not None:
                 if not Event.objects.for_user(request.user).filter(pk=given).exists():
@@ -77,6 +84,11 @@ class EventViewSet(viewsets.ModelViewSet):
                 if existing.deleted_at:
                     # Deleted after the write was queued; the delete wins rather
                     # than the event coming back from the dead.
+                    return Response(self.get_serializer(existing).data)
+                if existing.ended_at and request.data.get("in_progress"):
+                    # A queued "start a timer" write arriving after that timer was
+                    # already finished. Applying it would set in_progress on an
+                    # event with an end and trip the DB constraint.
                     return Response(self.get_serializer(existing).data)
                 ser = self.get_serializer(existing, data=request.data, partial=True)
                 ser.is_valid(raise_exception=True)
