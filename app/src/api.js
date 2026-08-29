@@ -1,10 +1,14 @@
 import Constants from 'expo-constants';
 import { getItem, removeItem, setItem } from './storage';
 
-const BASE =
-  process.env.EXPO_PUBLIC_API_URL ||
-  Constants.expoConfig?.extra?.apiUrl ||
+// 'same-origin' is what the Fly web build is compiled with: the page and the API
+// come from the same host, so requests are relative and CORS never applies.
+// Native builds get the absolute URL from app.json.
+const RAW =
+  process.env.EXPO_PUBLIC_API_URL ??
+  Constants.expoConfig?.extra?.apiUrl ??
   'http://localhost:8000';
+const BASE = RAW === 'same-origin' ? '' : RAW.replace(/\/+$/, '');
 
 const TOKEN_KEY = 'babylog.token';
 let token = null;

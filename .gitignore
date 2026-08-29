@@ -16,3 +16,6 @@ app/node_modules/
 app/.expo/
 app/dist/
 app/web-build/
+
+# Web build copied in by the Docker web stage
+server/webroot/

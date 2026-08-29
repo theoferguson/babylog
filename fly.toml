@@ -2,6 +2,7 @@ app = "babylog-app"
 primary_region = "iad"
 
 [build]
+  dockerfile = "Dockerfile"
 
 [env]
   DEBUG = "0"

@@ -1,9 +1,10 @@
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 from rest_framework.authtoken.views import obtain_auth_token
 from rest_framework.routers import DefaultRouter
 
 from events import views
+from events.web import healthz, serve_web
 
 router = DefaultRouter()
 router.register("households", views.HouseholdViewSet, basename="household")
@@ -16,4 +17,8 @@ urlpatterns = [
     path("api/auth/token/", obtain_auth_token),
     path("api/import/preview/", views.import_preview),
     path("api/import/commit/", views.import_commit),
+    path("healthz", healthz),
+    # Catch-all LAST: anything not an API, admin or static asset is a web-app
+    # route and gets the SPA entry.
+    re_path(r"^(?P<path>.*)$", serve_web),
 ]

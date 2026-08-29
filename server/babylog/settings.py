@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 import dj_database_url
@@ -119,6 +120,23 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
+
+# The exported Expo web build, copied in by the Docker web stage. Absent in
+# local development, where Metro serves the app instead.
+WEB_ROOT = Path(os.environ.get("WEB_ROOT", BASE_DIR / "webroot"))
+if WEB_ROOT.is_dir():
+    # WhiteNoise serves the hashed assets under _expo/ only. HTML is deliberately
+    # left to serve_web so every page carries no-cache -- otherwise a redeploy
+    # would never reach a tab that is already open.
+    WHITENOISE_ROOT = WEB_ROOT
+    # Expo emits content-hashed asset names, so they can be cached forever.
+    # WhiteNoise's default immutability test only knows Django's manifest
+    # pattern, which these do not match -- without this, 1.2MB revalidates on
+    # every load.
+    WHITENOISE_IMMUTABLE_FILE_TEST = staticmethod(
+        lambda path, url: re.search(r"[.-][0-9a-f]{8,}\.(js|css|woff2?|png|jpg|svg)$", url)
+        is not None
+    )
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"

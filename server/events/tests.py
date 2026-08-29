@@ -1,3 +1,4 @@
+import tempfile
 from datetime import timedelta
 from pathlib import Path
 
@@ -357,3 +358,55 @@ class EventDetailTests(APITestCase):
         other, _, _ = make_household("detail-outsider")
         self.client.force_authenticate(other)
         self.assertEqual(self.client.get(f"/api/events/{self.ev}/").status_code, 404)
+
+
+class WebBuildTests(TestCase):
+    """The catch-all serves the Expo build without exposing the filesystem."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.tmp = Path(tempfile.mkdtemp())
+        (cls.tmp / "log").mkdir()
+        (cls.tmp / "index.html").write_text("<html>spa</html>")
+        (cls.tmp / "nurse.html").write_text("<html>nurse</html>")
+        (cls.tmp / "log" / "bottle.html").write_text("<html>bottle</html>")
+        (cls.tmp.parent / "secret.txt").write_text("do not serve me")
+
+    def body(self, resp):
+        return b"".join(resp.streaming_content).decode()
+
+    def test_root_serves_the_spa_entry(self):
+        with self.settings(WEB_ROOT=self.tmp):
+            r = self.client.get("/")
+            self.assertEqual(r.status_code, 200)
+            self.assertIn("spa", self.body(r))
+
+    def test_pretty_routes_map_to_flat_html(self):
+        with self.settings(WEB_ROOT=self.tmp):
+            self.assertIn("nurse", self.body(self.client.get("/nurse")))
+            self.assertIn("bottle", self.body(self.client.get("/log/bottle")))
+
+    def test_unknown_route_falls_back_to_the_spa(self):
+        # A dynamic route like /event/<uuid> has no file; expo-router resolves it
+        # client-side after the entry loads.
+        with self.settings(WEB_ROOT=self.tmp):
+            r = self.client.get("/event/2f1c9b1e-0000-4000-8000-000000000000")
+            self.assertEqual(r.status_code, 200)
+            self.assertIn("spa", self.body(r))
+
+    def test_traversal_cannot_escape_the_build_directory(self):
+        with self.settings(WEB_ROOT=self.tmp):
+            r = self.client.get("/../secret")
+            # Either refused outright or handed the SPA entry -- never the file.
+            if r.status_code == 200:
+                self.assertNotIn("do not serve me", self.body(r))
+
+    def test_api_routes_are_not_swallowed_by_the_catch_all(self):
+        with self.settings(WEB_ROOT=self.tmp):
+            self.assertEqual(self.client.get("/api/events/").status_code, 401)
+            self.assertEqual(self.client.get("/healthz").status_code, 200)
+
+    def test_missing_build_does_not_500(self):
+        with self.settings(WEB_ROOT=Path("/nonexistent")):
+            self.assertEqual(self.client.get("/").status_code, 404)
