@@ -15,8 +15,14 @@ export default function Join() {
   const [code, setCode] = useState(String(params.code || ''));
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+
+  // Only complain once they have actually typed something in the second box --
+  // flagging a mismatch against an empty field is just noise.
+  const mismatch = confirm.length > 0 && confirm !== password;
+  const ready = code && username && password && confirm === password;
 
   const submit = async () => {
     setBusy(true);
@@ -72,13 +78,27 @@ export default function Join() {
           autoComplete="new-password"
           value={password}
           onChangeText={setPassword}
-          onSubmitEditing={submit}
         />
+        <TextInput
+          style={[s.input, mismatch ? { borderColor: c.danger } : null]}
+          placeholder="Confirm password"
+          placeholderTextColor={c.muted}
+          secureTextEntry
+          autoComplete="new-password"
+          value={confirm}
+          onChangeText={setConfirm}
+          onSubmitEditing={() => ready && submit()}
+        />
+        {mismatch ? (
+          <Text style={{ color: c.danger, fontSize: 13 }}>
+            Those two passwords do not match.
+          </Text>
+        ) : null}
 
         <Button
           title={busy ? 'Joining…' : 'Create my account'}
           onPress={submit}
-          disabled={busy || !code || !username || !password}
+          disabled={busy || !ready}
           style={{ marginTop: space }}
         />
         <ErrorNote error={error} />
