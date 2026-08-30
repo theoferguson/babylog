@@ -628,7 +628,15 @@ dropped. A send failure never loses the invite — the response says
 too. Both work whether the timer is running or paused, because the side
 accumulators are independent of `started_at`.
 
-The server enforces the invariant that makes this safe: **nursing sides can never
+**Editing the side times stretches the feed rather than refusing the edit.** If
+you type 18 + 12 minutes into a feed recorded as 21, the end moves out to fit and
+the screen says so — "Feed lasted 30m — extended to fit the side times you
+entered". Shrinking a side leaves the length alone, because sides shorter than
+the feed just mean a pause. Only genuinely impossible input is blocked: side
+times adding up to more than the time since the feed started would put its end in
+the future.
+
+The server invariant is unchanged and still enforced — **nursing sides can never
 add up to more time than the feed itself lasted.** That was reachable two ways
 before — dragging the start time forward on a running timer, and typing minutes
 by hand in the event editor, which had no check at all. Both are now 400s.

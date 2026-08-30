@@ -909,3 +909,45 @@ class SessionCookieDoesNotBreakTheApiTests(TestCase):
         c = Client(enforce_csrf_checks=True)
         c.login(username="theo-csrf", password="pw-for-tests-only")
         self.assertEqual(c.get("/api/events/").status_code, 401)
+
+
+class FeedStretchTests(APITestCase):
+    """Editing side times should be able to lengthen the feed, not be refused."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-stretch")
+        self.client.force_authenticate(self.user)
+        self.t0 = timezone.now() - timedelta(hours=2)
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(),
+            "ended_at": (self.t0 + timedelta(minutes=21)).isoformat(),
+            "payload": {"method": "breast", "right_sec": 13 * 60, "left_sec": 8 * 60}},
+            format="json")
+        self.assertEqual(r.status_code, 201, r.json())
+        self.ev = r.json()["id"]
+
+    def test_growing_a_side_and_the_end_together_is_accepted(self):
+        # What the editor now sends: 30 minutes of sides, with the end stretched
+        # to match.
+        r = self.client.patch(f"/api/events/{self.ev}/", {
+            "payload": {"method": "breast", "right_sec": 18 * 60, "left_sec": 12 * 60},
+            "ended_at": (self.t0 + timedelta(minutes=30)).isoformat()}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["duration_sec"], 30 * 60)
+
+    def test_growing_a_side_without_the_end_is_still_refused(self):
+        # The invariant still holds for anything that does not send a new end.
+        r = self.client.patch(f"/api/events/{self.ev}/", {
+            "payload": {"method": "breast", "right_sec": 18 * 60, "left_sec": 12 * 60}},
+            format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("sides", str(r.json()).lower())
+
+    def test_shrinking_a_side_leaves_the_feed_length_alone(self):
+        # Sides may be shorter than the feed -- that is a pause, not an error.
+        r = self.client.patch(f"/api/events/{self.ev}/", {
+            "payload": {"method": "breast", "right_sec": 5 * 60, "left_sec": 5 * 60}},
+            format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["duration_sec"], 21 * 60)
