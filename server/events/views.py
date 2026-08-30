@@ -334,6 +334,12 @@ def _bank_running_side(payload, at):
     # A clock that jumps backwards must never subtract time already banked.
     elapsed = max(0, int((at - started).total_seconds()))
     payload[key] = int(payload.get(key) or 0) + elapsed
+    if elapsed:
+        # Remember when, not just how long: one feed can be several stretches
+        # with gaps, and the calendar draws the gaps differently.
+        segments = list(payload.get("segments") or [])
+        segments.append({"side": side, "from": started.isoformat(), "to": at.isoformat()})
+        payload["segments"] = segments
 
 
 def _spool(upload):

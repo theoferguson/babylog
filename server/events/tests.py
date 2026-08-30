@@ -945,13 +945,17 @@ class FeedStretchTests(APITestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("sides", str(r.json()).lower())
 
-    def test_shrinking_a_side_leaves_the_feed_length_alone(self):
-        # Sides may be shorter than the feed -- that is a pause, not an error.
+    def test_shrinking_a_side_shortens_the_duration_but_not_the_span(self):
+        # Duration is nursing time, so cutting the sides cuts it. The recorded
+        # end is untouched: the feed still finished when it finished.
         r = self.client.patch(f"/api/events/{self.ev}/", {
             "payload": {"method": "breast", "right_sec": 5 * 60, "left_sec": 5 * 60}},
             format="json")
         self.assertEqual(r.status_code, 200, r.json())
-        self.assertEqual(r.json()["duration_sec"], 21 * 60)
+        self.assertEqual(r.json()["duration_sec"], 10 * 60)
+        self.assertEqual(
+            parse_datetime(r.json()["ended_at"]) - parse_datetime(r.json()["started_at"]),
+            timedelta(minutes=21))
 
 
 class StartTimeCarriesTheRunningSideTests(APITestCase):
@@ -1028,3 +1032,71 @@ class StartTimeCarriesTheRunningSideTests(APITestCase):
                               format="json")
         self.assertEqual(r.status_code, 200, r.json())
         self.assertEqual(r.json()["payload"]["right_sec"], 10 * 60)
+
+
+class NursingDurationTests(APITestCase):
+    """A nursing feed lasts as long as the timer ran, not start to end."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-duration")
+        self.client.force_authenticate(self.user)
+        self.t0 = timezone.now() - timedelta(hours=2)
+
+    def start(self):
+        return self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json").json()["id"]
+
+    def tick(self, ev, action, side=None, mins=0):
+        body = {"action": action, "at": (self.t0 + timedelta(minutes=mins)).isoformat()}
+        if side:
+            body["side"] = side
+        return self.client.post(f"/api/events/{ev}/timer/", body, format="json")
+
+    def test_a_paused_feed_counts_only_the_nursing(self):
+        ev = self.start()
+        self.tick(ev, "start", "R", 0)
+        self.tick(ev, "stop", mins=4)          # 4 minutes on R
+        self.tick(ev, "start", "L", 90)        # ...then an 86 minute gap
+        r = self.client.post(f"/api/events/{ev}/finish/",
+                             {"at": (self.t0 + timedelta(minutes=105)).isoformat()},
+                             format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        p = r.json()["payload"]
+        self.assertEqual(p["right_sec"], 4 * 60)
+        self.assertEqual(p["left_sec"], 15 * 60)
+        # 19 minutes of nursing, not the 105 minutes it spanned.
+        self.assertEqual(r.json()["duration_sec"], 19 * 60)
+
+    def test_each_stretch_is_recorded_with_its_times(self):
+        ev = self.start()
+        self.tick(ev, "start", "R", 0)
+        self.tick(ev, "stop", mins=4)
+        self.tick(ev, "start", "L", 90)
+        r = self.client.post(f"/api/events/{ev}/finish/",
+                             {"at": (self.t0 + timedelta(minutes=105)).isoformat()},
+                             format="json")
+        segs = r.json()["payload"]["segments"]
+        self.assertEqual([s["side"] for s in segs], ["R", "L"])
+        self.assertEqual(parse_datetime(segs[0]["from"]), self.t0)
+        self.assertEqual(parse_datetime(segs[1]["from"]), self.t0 + timedelta(minutes=90))
+        # The gap between them is the paused stretch the calendar fades out.
+        gap = parse_datetime(segs[1]["from"]) - parse_datetime(segs[0]["to"])
+        self.assertEqual(gap, timedelta(minutes=86))
+
+    def test_a_bottle_feed_still_uses_wall_clock(self):
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(),
+            "ended_at": (self.t0 + timedelta(minutes=12)).isoformat(),
+            "payload": {"method": "bottle", "volume_ml": 100}}, format="json")
+        self.assertEqual(r.json()["duration_sec"], 12 * 60)
+
+    def test_sleep_still_uses_wall_clock(self):
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "sleep",
+            "started_at": self.t0.isoformat(),
+            "ended_at": (self.t0 + timedelta(minutes=95)).isoformat(),
+            "payload": {}}, format="json")
+        self.assertEqual(r.json()["duration_sec"], 95 * 60)

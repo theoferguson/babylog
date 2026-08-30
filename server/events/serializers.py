@@ -23,6 +23,9 @@ PAYLOAD_FIELDS = {
         # /timer/, never these values.
         "running_side": (str, False),   # L | R, or absent when paused
         "running_since": (str, False),  # iso8601
+        # When each side actually ran: [{side, from, to}]. Lets the calendar
+        # draw the paused stretches differently from the nursing ones.
+        "segments": (list, False),
         "contents": (str, False),
         "volume_ml": (float, False),
     },

@@ -16,6 +16,14 @@ const MIN_BLOCK = 22;
 //
 // Placement uses each event's OWN recorded zone, not the viewer's, so a day
 // logged in another timezone still reads correctly after you fly home.
+// Only a paused nursing feed has stretches worth distinguishing; one unbroken
+// stretch is just a solid block.
+function segmentsFor(e) {
+  const segs = e.payload?.segments;
+  if (!Array.isArray(segs) || segs.length < 2 || !e.ended_at) return null;
+  return segs;
+}
+
 export default function Timeline({ events, units, tz, onPress }) {
   const blocks = layout(events, { tz, hourPx: HOUR, minPx: MIN_BLOCK });
   return (
@@ -62,11 +70,48 @@ export default function Timeline({ events, units, tz, onPress }) {
               <View
                 style={{
                   flex: 1,
+                  // A paused feed is drawn faded across its whole span with the
+                  // stretches it was actually nursing picked out solid. Without
+                  // segments (imported rows, instant events) it is solid
+                  // throughout, which is what those are.
                   backgroundColor: t.fill,
+                  opacity: segmentsFor(e) ? 0.35 : 1,
                   borderRadius: 8,
                   justifyContent: 'center',
                   paddingHorizontal: 8,
                   overflow: 'hidden',
+                }}
+              />
+              {segmentsFor(e)?.map((seg, i) => {
+                const from = new Date(seg.from).getTime();
+                const to = new Date(seg.to).getTime();
+                const span = new Date(e.ended_at || e.started_at).getTime()
+                  - new Date(e.started_at).getTime();
+                if (span <= 0) return null;
+                const topPct = ((from - new Date(e.started_at).getTime()) / span) * 100;
+                const hPct = ((to - from) / span) * 100;
+                return (
+                  <View
+                    key={i}
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      left: 0, right: gapPx,
+                      top: `${Math.max(0, topPct)}%`,
+                      height: `${Math.max(1, hPct)}%`,
+                      backgroundColor: t.fill,
+                      borderRadius: 4,
+                    }}
+                  />
+                );
+              })}
+              <View
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  left: 0, right: gapPx, top: 0, bottom: 0,
+                  justifyContent: 'center',
+                  paddingHorizontal: 8,
                 }}
               >
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

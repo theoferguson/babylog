@@ -192,6 +192,15 @@ class Event(models.Model):
 
     @property
     def duration_sec(self):
+        """How long the event lasted.
+
+        For nursing this is time the timer actually ran -- the two sides added
+        up -- not start-to-end. A feed can be paused and picked up again, and the
+        paused stretch is not nursing time. Everything else is wall clock.
+        """
+        if self.type == self.FEED and (self.payload or {}).get("method") == "breast":
+            p = self.payload or {}
+            return (p.get("right_sec") or 0) + (p.get("left_sec") or 0) or None
         if not self.ended_at:
             return None
         return (self.ended_at - self.started_at).total_seconds()

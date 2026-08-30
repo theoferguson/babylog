@@ -623,9 +623,20 @@ Gmail. No dependency, no provider lock-in: any SMTP host works by overriding
 dropped. A send failure never loses the invite — the response says
 `email_sent: false` and the UI offers the link to pass on by hand.
 
-**The headline clock is time the timer actually ran** — the two sides added up,
-across however many stretches. It is *not* start-to-now: a feed can be paused and
-picked up again, and the paused stretch is not nursing time.
+**A nursing feed's duration is time the timer actually ran** — the two sides
+added up, across however many stretches — everywhere it appears: the headline
+clock, the calendar label, and the nursing-minutes charts in Insights. It is
+*not* start-to-end: a feed can be paused and picked up again, and the paused
+stretch is not nursing time. Bottle feeds and sleep still use wall clock, since
+for those the two are the same thing.
+
+**The calendar shows the difference rather than hiding it.** A paused feed is
+drawn faded across its whole span with the stretches it was actually nursing
+picked out solid, so a 19-minute feed spread over 105 minutes reads as exactly
+that. This needs `payload.segments` — `[{side, from, to}]`, appended whenever a
+side is banked — because per-side totals alone cannot say *when*. Events without
+segments (everything imported, every instant event) draw solid, which is right
+for them.
 
 **Correcting the start time therefore has to land in the total.** Moving the
 start back ten minutes shifts the *running segment* back with it, so the side
