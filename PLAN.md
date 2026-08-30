@@ -641,9 +641,20 @@ segments: there the real span is drawn faded with the nursing stretches picked
 out inside it, because then there is something worth seeing. Everything imported
 and every instant event has no segments and draws solid, which is right for them.
 
-This matters because the start time is the editable, meaningful end of a feed —
-you correct when it began — while the recorded end is just when Save was pressed.
-Sizing blocks by the span made a corrected start look like a longer feed.
+**What each timestamp is actually for**, since conflating them caused several
+rounds of this:
+
+- `started_at` — **where the feed sits on the calendar.** That is its whole job.
+  It is the one a parent corrects, because "this began at 5:30, not 7:00" is a
+  real thing to fix.
+- `ended_at` — bookkeeping. It is whenever Save was pressed, and for a paused
+  feed it says nothing useful on its own.
+- `right_sec + left_sec` — **how long the feed was**, and the only thing that
+  should ever be called its duration.
+
+Sizing blocks by `ended_at - started_at` therefore made correcting a start time
+look like lengthening the feed, which is backwards: moving the pin should move
+the block, not stretch it.
 
 **Correcting the start time therefore has to land in the total.** Moving the
 start back ten minutes shifts the *running segment* back with it, so the side
