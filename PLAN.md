@@ -914,12 +914,25 @@ absent on a phone. Native changes (new packages, icon, version) still need
 
 ### What is actually left
 
-**Worth doing when it bites, not before:**
-- **Abandoned-timer nudge.** A feed started and never saved stays `in_progress`
-  forever — it sits on `/active/`, keeps the home-screen banner up, and blocks
-  the next feed from starting fresh (the server hands back the stale one). The
-  fix is a "still nursing?" prompt past ~3h with finish-or-discard. This is the
-  one known gap that will happen on its own.
+**Every running timer is visible on the home screen.** Deliberately not a nudge
+— just never hiding one. Four ways a timer could previously go unseen, all now
+closed:
+
+- only the *first* active timer got a banner, so two babies nursing showed one
+- the banner was hardcoded to nursing colours and the word "Nursing", so any
+  other interval type would have been mislabelled
+- a timer started **offline** lives only on this device, so the server could not
+  report it and the home screen showed nothing — the moment you most want to see
+  it still counting. The banner now reads that local state too and says
+  "on this phone only"
+- the banner *replaced* the last-event summary; both show now, because "when did
+  he last eat" is still the question mid-feed
+
+The nurse screen also opens the timer for the **selected** baby rather than
+whichever came back first.
+
+No abandoned-timer prompt: a forgotten feed is now plainly visible rather than
+silently accumulating, which is the part that actually mattered.
 
 **Blocked on data, correctly:**
 - **Phase 6 predictions** and **Phase 7 reminders** both need sleep history, and

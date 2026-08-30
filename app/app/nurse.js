@@ -53,7 +53,8 @@ export default function Nurse() {
   const [notesDirty, setNotesDirty] = useState(false);
   const [editStart, setEditStart] = useState(false);
 
-  const remote = events.find((e) => e.type === 'feed') || null;
+  const remote =
+    events.find((e) => e.type === 'feed' && (!babyId || e.baby === babyId)) || null;
 
   // A timer left running when the app died is picked back up here.
   useEffect(() => {

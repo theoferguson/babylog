@@ -9,6 +9,7 @@ import { flush } from '../src/outbox';
 import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../src/days';
 import { ago, summarize, timeOfDay } from '../src/format';
 import { useSession } from '../src/session';
+import * as localTimer from '../src/localTimer';
 import { c, space, styleFor, types } from '../src/theme';
 import Timeline from '../src/Timeline';
 import WeekStrip from '../src/WeekStrip';
@@ -32,6 +33,10 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState(false);
+  // A timer started with no connection lives only on this device, so the server
+  // cannot report it. Without this it would be invisible here -- the moment you
+  // most want reassurance it is still counting.
+  const [offlineTimer, setOfflineTimer] = useState(null);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -39,6 +44,7 @@ export default function Home() {
       // Anything queued while offline goes up before we read, so the screen
       // does not show a stale server view that omits your own writes.
       await flush();
+      setOfflineTimer(await localTimer.load());
       const { since, until } = dayBounds(day, tz);
       // One week query feeds both the strip's density dots and the day list.
       const wk = dayBounds(addDays(todayKey(tz), -6), tz);
@@ -71,8 +77,18 @@ export default function Home() {
     }, [load, active.length]),
   );
 
-  const running = active[0];
-  const now = useNow(!!running) + skewMs;
+  // Every running timer is shown, not just the first: two babies can nurse at
+  // once, and a silently hidden timer is worse than no timer.
+  const remoteIds = new Set(active.map((e) => e.id));
+  const banners = [
+    ...active.map((e) => ({ key: e.id, state: fromEvent(e), event: e, offline: false })),
+    // ...unless this device is shadowing one of them locally.
+    ...(offlineTimer && !remoteIds.has(offlineTimer.remoteId)
+      ? [{ key: 'local', state: offlineTimer, event: null, offline: true }]
+      : []),
+  ];
+  const anyRunning = banners.some((b) => b.state.running_side);
+  const now = useNow(anyRunning) + skewMs;
   const isToday = day === todayKey(tz);
 
   const rollup = useMemo(() => {
@@ -121,11 +137,20 @@ export default function Home() {
         </View>
       </View>
 
-      {running ? (
-        <RunningBanner event={running} now={now} onPress={() => router.push('/nurse')} />
-      ) : (
-        <Summary latest={latest} units={units} />
-      )}
+      {banners.map((b) => (
+        <RunningBanner
+          key={b.key}
+          state={b.state}
+          event={b.event}
+          offline={b.offline}
+          babyName={babies.length > 1 ? babies.find((x) => x.id === b.event?.baby)?.name : null}
+          now={now}
+          onPress={() => router.push('/nurse')}
+        />
+      ))}
+      {/* The summary stays visible alongside a running timer: "when did he last
+          eat" is still the question, even mid-feed. */}
+      <Summary latest={latest} units={units} />
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: space }}>
         <LogButton t={types.nurse} onPress={() => router.push('/nurse')} />
@@ -241,23 +266,38 @@ function Summary({ latest, units }) {
   );
 }
 
-function RunningBanner({ event, now, onPress }) {
-  const p = event.payload || {};
-  const live = p.running_since
-    ? Math.round((now - new Date(p.running_since).getTime()) / 1000)
+// Normalises a server event into the same shape the offline timer uses, so one
+// banner renders both.
+function fromEvent(e) {
+  const p = e.payload || {};
+  return {
+    started_at: e.started_at,
+    right_sec: p.right_sec || 0,
+    left_sec: p.left_sec || 0,
+    running_side: p.running_side || null,
+    running_since: p.running_since || null,
+  };
+}
+
+function RunningBanner({ state, event, offline, babyName, now, onPress }) {
+  const t = event ? styleFor(event) : types.nurse;
+  const live = state.running_since
+    ? Math.max(0, Math.round((now - new Date(state.running_since).getTime()) / 1000))
     : 0;
-  const total = (p.right_sec || 0) + (p.left_sec || 0) + live;
+  const total = (state.right_sec || 0) + (state.left_sec || 0) + live;
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      style={[s.card, { marginTop: space, backgroundColor: types.nurse.fill, borderColor: types.nurse.fill }]}
+      accessibilityLabel={`${t.label} in progress, ${Math.round(total / 60)} minutes. Tap to open.`}
+      style={[s.card, { marginTop: space, backgroundColor: t.fill, borderColor: t.fill }]}
     >
       <Text style={[s.h2, { color: c.text }]}>
-        {types.nurse.icon} Nursing · {clock(total)}
+        {t.icon} {babyName ? `${babyName} · ` : ''}{t.label} · {clock(total)}
       </Text>
       <Text style={{ color: c.text, marginTop: 4 }}>
-        {p.running_side ? `${p.running_side} side running` : 'Paused'} — tap to open
+        {state.running_side ? `${state.running_side} side running` : 'Paused'}
+        {offline ? ' · on this phone only' : ''} — tap to open
       </Text>
     </Pressable>
   );
