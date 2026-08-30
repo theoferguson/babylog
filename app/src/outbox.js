@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { randomUUID } from 'expo-crypto';
-import { ApiError, api, useOutbox } from './api';
+import { ApiError, api, attachOutbox } from './api';
 
 // Offline writes. The timer is server-authoritative (both phones must see it),
 // so this queue is for the things that can wait: instant events, edits and
@@ -103,4 +103,4 @@ export async function writeThrough({ method, path, body, optimistic }) {
 
 // Wire the queue into the API layer. Done here rather than in api.js so the
 // module graph stays acyclic.
-useOutbox({ newId, writeThrough });
+attachOutbox({ newId, writeThrough });

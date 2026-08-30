@@ -80,6 +80,21 @@ export default function Nurse() {
     local.save({ ...offlineState, notes });
   }, [notes, notesDirty, offlineState]);
 
+  // Run a mutation with the screen's busy/error handling. Anything that throws
+  // here must be caught: an unhandled throw in a tap handler takes the app down.
+  const guard = async (fn) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await refresh();
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const goLocal = async (next) => {
     setOfflineState(next);
     await local.save(next);

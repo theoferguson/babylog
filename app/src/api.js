@@ -173,7 +173,7 @@ export const Babies = {
 // running timer must be visible on both phones and is meaningless offline.
 // `outbox` is injected at import time to avoid a require cycle.
 let outbox = null;
-export function useOutbox(mod) {
+export function attachOutbox(mod) {
   outbox = mod;
 }
 

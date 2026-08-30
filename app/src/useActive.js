@@ -57,7 +57,7 @@ export function useActiveEvents() {
 
 // A ticking clock that re-renders once a second, used only while something runs.
 export function useNow(active) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!active) return undefined;
     const id = setInterval(() => setNow(Date.now()), 1000);

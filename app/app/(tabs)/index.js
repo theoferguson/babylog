@@ -8,7 +8,7 @@ import { cached } from '../../src/cache';
 import OfflineBar from '../../src/OfflineBar';
 import { flush } from '../../src/outbox';
 import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../../src/days';
-import { ago, summarize, timeOfDay } from '../../src/format';
+import { ago, clock, summarize, timeOfDay } from '../../src/format';
 import { useSession } from '../../src/session';
 import * as localTimer from '../../src/localTimer';
 import { c, space, styleFor, types } from '../../src/theme';
@@ -16,7 +16,6 @@ import Timeline from '../../src/Timeline';
 import WeekStrip from '../../src/WeekStrip';
 import { ErrorNote, s } from '../../src/ui';
 import { useActiveEvents, useNow } from '../../src/useActive';
-import { clock } from '../../src/format';
 
 export default function Home() {
   const scroller = useRef(null);

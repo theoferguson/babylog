@@ -83,13 +83,16 @@ Points at `https://babylog-app.fly.dev` by default. For a local server:
 EXPO_PUBLIC_API_URL=http://localhost:8000 npx expo start
 ```
 
-All app checks: `npm run check` (7 unit suites plus a static guard).
+All app checks: `npm run check` — ESLint plus 7 unit suites.
 
-`check-globals.mjs` catches identifiers that exist as **browser** globals but not
-in Hermes — `event`, `name`, `status`, `location` and friends. `event.id` once
-shipped a crash to TestFlight this way: on web it silently resolved to
-`window.event`, so every web build and every export passed, and the bug only
-appeared on a phone.
+**`no-undef` is the rule that earns its keep.** A call to an undefined function
+is a synchronous throw in a tap handler, which is a hard crash on Hermes — and
+it is invisible to `expo export`, to `expo-doctor`, and to every web build,
+because bundling never resolves identifiers. Two crashes shipped to TestFlight
+this way (`event.id`, then `guard(...)`) before the linter went in.
+
+The React Compiler's purity/effect rules are kept as warnings, so a real
+`no-undef` is never buried in noise.
 Web build: `npx expo export --platform web`.
 
 | file | |

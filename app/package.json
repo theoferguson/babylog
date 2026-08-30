@@ -31,7 +31,12 @@
     "ios": "expo start --ios",
     "android": "expo start --android",
     "web": "expo start --web",
-    "check": "node check-globals.mjs && node src/days.test.mjs && node src/format.test.mjs && node src/stats.test.mjs && node src/outbox.test.mjs && node src/localTimer.test.mjs && node src/timelineLayout.test.mjs && node src/month.test.mjs"
+    "check": "expo lint --max-warnings 99 && node src/days.test.mjs && node src/format.test.mjs && node src/stats.test.mjs && node src/outbox.test.mjs && node src/localTimer.test.mjs && node src/timelineLayout.test.mjs && node src/month.test.mjs",
+    "lint": "expo lint"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "eslint-config-expo": "~57.0.2"
+  }
 }

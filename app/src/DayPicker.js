@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { todayKey } from './days';
 import { monthGrid, monthKey, monthLabel, shiftMonth } from './month';
-import { c, radius } from './theme';
+import { c } from './theme';
 import { s } from './ui';
 
 // Month grid for picking a day. Arrows alone make you tap fourteen times to

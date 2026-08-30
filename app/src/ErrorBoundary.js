@@ -1,6 +1,6 @@
 import { Component } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { c, space } from './theme';
+import { space } from './theme';
 import { Button, s } from './ui';
 
 // A render error would otherwise take the whole app down with a blank screen and
