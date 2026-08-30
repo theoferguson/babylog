@@ -67,9 +67,8 @@ export default function Nurse() {
   // Server skew corrects a server-issued running_since. A local timer's
   // running_since came from this device's clock, so adding skew would make it
   // start at zero (or jump) for the length of the drift.
-  // Ticks whenever a feed is open, not only while a side runs: the feed keeps
-  // getting longer while it is paused.
-  const now = useNow(!!view) + (offlineState ? 0 : skewMs);
+  // Only ticks while a side is running: a pause does not add to the total.
+  const now = useNow(!!view?.running_side) + (offlineState ? 0 : skewMs);
 
   useEffect(() => {
     if (view && !notesDirty) setNotes(view.notes || '');
@@ -257,9 +256,10 @@ export default function Nurse() {
   const checking = !loaded && !offlineState;
 
   const secs = (side) => (view ? local.secsFor(view, side, now) : 0);
-  const totalSecs = view
-    ? Math.max(0, Math.round((now - new Date(view.started_at).getTime()) / 1000))
-    : 0;
+  // The total is time the timer actually ran -- the two sides added up, across
+  // however many stretches. It is not start-to-now, because a feed can be paused
+  // and picked up again.
+  const totalSecs = secs('R') + secs('L');
 
   // Correcting the start time works whether the timer is running or paused --
   // the side accumulators are independent of it, so nothing is lost either way.

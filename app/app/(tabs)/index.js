@@ -89,8 +89,8 @@ export default function Home() {
       ? [{ key: 'local', state: offlineTimer, event: null, offline: true }]
       : []),
   ];
-  // A feed lengthens while paused too, so the banner ticks whenever one is open.
-  const now = useNow(banners.length > 0) + skewMs;
+  const anyRunning = banners.some((b) => b.state.running_side);
+  const now = useNow(anyRunning) + skewMs;
   const isToday = day === todayKey(tz);
 
   const rollup = useMemo(() => {
@@ -281,9 +281,11 @@ function fromEvent(e) {
 
 function RunningBanner({ state, event, offline, babyName, now, onPress }) {
   const t = event ? styleFor(event) : types.nurse;
-  // Elapsed since the feed started -- the same number the nurse screen shows and
-  // the same one that gets saved as its duration.
-  const total = Math.max(0, Math.round((now - new Date(state.started_at).getTime()) / 1000));
+  // Time the timer actually ran, matching the nurse screen.
+  const live = state.running_since
+    ? Math.max(0, Math.round((now - new Date(state.running_since).getTime()) / 1000))
+    : 0;
+  const total = (state.right_sec || 0) + (state.left_sec || 0) + live;
   return (
     <Pressable
       onPress={onPress}

@@ -623,11 +623,15 @@ Gmail. No dependency, no provider lock-in: any SMTP host works by overriding
 dropped. A send failure never loses the invite — the response says
 `email_sent: false` and the UI offers the link to pass on by hand.
 
-**The headline clock counts the feed, not the sides.** It shows start → now,
-which is exactly what gets saved as `duration_sec`, and it keeps ticking while
-paused — a pause lengthens the feed but not a side. The per-side numbers on the
-L/R buttons stay the time spent on each. The two are different quantities and
-used to be conflated, so correcting a start time appeared to do nothing.
+**The headline clock is time the timer actually ran** — the two sides added up,
+across however many stretches. It is *not* start-to-now: a feed can be paused and
+picked up again, and the paused stretch is not nursing time.
+
+**Correcting the start time therefore has to land in the total.** Moving the
+start back ten minutes shifts the *running segment* back with it, so the side
+that was running gains those ten minutes. A paused feed's total is unchanged,
+which is right: nothing was counting during that stretch. Done server-side, in
+`EventSerializer.update`, because the client must never compute accumulators.
 
 **A running feed is editable before it is saved.** The nurse screen shows
 "Started 3:14pm — tap to adjust" and opens a date/time field; notes are editable

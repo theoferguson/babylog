@@ -8,6 +8,7 @@ from django.core.cache import cache
 from django.core.management import call_command
 from django.test import Client, TestCase
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.test import APITestCase
 
 from .models import Baby, Event, Household, Invite, Membership
@@ -951,3 +952,79 @@ class FeedStretchTests(APITestCase):
             format="json")
         self.assertEqual(r.status_code, 200, r.json())
         self.assertEqual(r.json()["duration_sec"], 21 * 60)
+
+
+class StartTimeCarriesTheRunningSideTests(APITestCase):
+    """The total is time the timer ran, so correcting the start has to land in it."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-carry")
+        self.client.force_authenticate(self.user)
+        self.t0 = timezone.now() - timedelta(minutes=13)
+        r = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json")
+        self.ev = r.json()["id"]
+
+    def running_since(self):
+        return parse_datetime(
+            self.client.get(f"/api/events/{self.ev}/").json()["payload"]["running_since"])
+
+    def test_moving_the_start_back_lengthens_the_running_side(self):
+        self.client.post(f"/api/events/{self.ev}/timer/",
+                         {"action": "start", "side": "R", "at": self.t0.isoformat()},
+                         format="json")
+        before = self.running_since()
+        earlier = self.t0 - timedelta(minutes=10)
+        r = self.client.patch(f"/api/events/{self.ev}/",
+                              {"started_at": earlier.isoformat()}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        # The running segment moved with it, so ten more minutes are on that side.
+        self.assertEqual((before - self.running_since()), timedelta(minutes=10))
+
+        # ...and banking it proves the total grew by exactly that much.
+        r = self.client.post(f"/api/events/{self.ev}/finish/",
+                             {"at": (self.t0 + timedelta(minutes=13)).isoformat()},
+                             format="json")
+        self.assertEqual(r.json()["payload"]["right_sec"], 23 * 60)
+
+    def test_moving_the_start_forward_shortens_it(self):
+        self.client.post(f"/api/events/{self.ev}/timer/",
+                         {"action": "start", "side": "L", "at": self.t0.isoformat()},
+                         format="json")
+        later = self.t0 + timedelta(minutes=5)
+        self.client.patch(f"/api/events/{self.ev}/", {"started_at": later.isoformat()},
+                          format="json")
+        r = self.client.post(f"/api/events/{self.ev}/finish/",
+                             {"at": (self.t0 + timedelta(minutes=13)).isoformat()},
+                             format="json")
+        self.assertEqual(r.json()["payload"]["left_sec"], 8 * 60)
+
+    def test_a_paused_feed_keeps_its_total_when_the_start_moves(self):
+        # Nothing was running, so nothing should be added: that stretch was not
+        # counted in the first place.
+        self.client.post(f"/api/events/{self.ev}/timer/",
+                         {"action": "start", "side": "R", "at": self.t0.isoformat()},
+                         format="json")
+        self.client.post(f"/api/events/{self.ev}/timer/",
+                         {"action": "stop", "at": (self.t0 + timedelta(minutes=9)).isoformat()},
+                         format="json")
+        r = self.client.patch(f"/api/events/{self.ev}/",
+                              {"started_at": (self.t0 - timedelta(minutes=30)).isoformat()},
+                              format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["payload"]["right_sec"], 9 * 60)
+        self.assertNotIn("running_since", r.json()["payload"])
+
+    def test_a_finished_feed_is_not_touched_by_this(self):
+        self.client.post(f"/api/events/{self.ev}/timer/",
+                         {"action": "start", "side": "R", "at": self.t0.isoformat()},
+                         format="json")
+        self.client.post(f"/api/events/{self.ev}/finish/",
+                         {"at": (self.t0 + timedelta(minutes=10)).isoformat()}, format="json")
+        r = self.client.patch(f"/api/events/{self.ev}/",
+                              {"started_at": (self.t0 - timedelta(minutes=5)).isoformat()},
+                              format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["payload"]["right_sec"], 10 * 60)

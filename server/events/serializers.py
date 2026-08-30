@@ -5,6 +5,7 @@ from django.contrib.auth import password_validation
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import serializers
 
 from .models import Baby, Event, Household, Invite, Membership
@@ -107,6 +108,8 @@ class HouseholdSerializer(serializers.ModelSerializer):
 
 
 class EventSerializer(serializers.ModelSerializer):
+    """Events, with per-type payload validation."""
+
     duration_sec = serializers.ReadOnlyField()
     # Declared explicitly because the model field is editable=False, which would
     # otherwise make DRF read-only it and silently discard the client's id. The
@@ -120,6 +123,27 @@ class EventSerializer(serializers.ModelSerializer):
                   "notes", "created_by", "updated_at", "deleted_at", "duration_sec",
                   "in_progress"]
         read_only_fields = ["created_by", "updated_at"]
+
+    def update(self, instance, validated_data):
+        """Moving a running feed's start time carries the running side with it.
+
+        The total is time the timer actually ran, so pushing the start back ten
+        minutes has to add ten minutes to whichever side was running -- otherwise
+        the correction shows up in the start time and nowhere in the total.
+        A paused feed has nothing running, so its total is unaffected, which is
+        correct: no side was counting during that stretch.
+        """
+        new_start = validated_data.get("started_at")
+        if new_start and instance.in_progress and new_start != instance.started_at:
+            payload = dict(validated_data.get("payload") or instance.payload or {})
+            since = payload.get("running_since")
+            if since:
+                started = parse_datetime(since)
+                if started is not None:
+                    shifted = started + (new_start - instance.started_at)
+                    payload["running_since"] = shifted.isoformat()
+                    validated_data["payload"] = payload
+        return super().update(instance, validated_data)
 
     def validate(self, attrs):
         # The id is settable only at creation. Letting it through on update makes
