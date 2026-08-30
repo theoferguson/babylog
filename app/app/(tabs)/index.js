@@ -2,20 +2,20 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Events } from '../src/api';
-import { cached } from '../src/cache';
-import OfflineBar from '../src/OfflineBar';
-import { flush } from '../src/outbox';
-import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../src/days';
-import { ago, summarize, timeOfDay } from '../src/format';
-import { useSession } from '../src/session';
-import * as localTimer from '../src/localTimer';
-import { c, space, styleFor, types } from '../src/theme';
-import Timeline from '../src/Timeline';
-import WeekStrip from '../src/WeekStrip';
-import { ErrorNote, s } from '../src/ui';
-import { useActiveEvents, useNow } from '../src/useActive';
-import { clock } from '../src/format';
+import { Events } from '../../src/api';
+import { cached } from '../../src/cache';
+import OfflineBar from '../../src/OfflineBar';
+import { flush } from '../../src/outbox';
+import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../../src/days';
+import { ago, summarize, timeOfDay } from '../../src/format';
+import { useSession } from '../../src/session';
+import * as localTimer from '../../src/localTimer';
+import { c, space, styleFor, types } from '../../src/theme';
+import Timeline from '../../src/Timeline';
+import WeekStrip from '../../src/WeekStrip';
+import { ErrorNote, s } from '../../src/ui';
+import { useActiveEvents, useNow } from '../../src/useActive';
+import { clock } from '../../src/format';
 
 export default function Home() {
   const insets = useSafeAreaInsets();
@@ -125,9 +125,6 @@ export default function Home() {
           <Text style={s.h1}>{babies[0]?.name || 'babylog'}</Text>
         )}
         <View style={[s.row, { gap: 16 }]}>
-          <Pressable onPress={() => router.push('/insights')} accessibilityRole="button">
-            <Text style={s.muted}>Insights</Text>
-          </Pressable>
           <Pressable onPress={() => router.push('/import')} accessibilityRole="button">
             <Text style={s.muted}>Import</Text>
           </Pressable>

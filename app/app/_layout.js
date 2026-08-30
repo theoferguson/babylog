@@ -35,7 +35,7 @@ function Gate() {
         contentStyle: { backgroundColor: c.bg },
       }}
     >
-      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="join" options={{ headerShown: false }} />
       <Stack.Screen name="nurse" options={{ title: 'Nursing' }} />
@@ -44,7 +44,6 @@ function Gate() {
       <Stack.Screen name="log/pump" options={{ title: 'Pump' }} />
       <Stack.Screen name="import" options={{ title: 'Import' }} />
       <Stack.Screen name="event/[id]" options={{ title: 'Edit event' }} />
-      <Stack.Screen name="insights" options={{ title: 'Insights' }} />
       <Stack.Screen name="settings" options={{ title: 'Settings' }} />
     </Stack>
   );

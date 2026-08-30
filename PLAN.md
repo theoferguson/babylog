@@ -912,6 +912,27 @@ to the phones. Forgetting the second is why a change can be live on the web and
 absent on a phone. Native changes (new packages, icon, version) still need
 `eas build` + `eas submit`. Settings shows the running update id.
 
+### Navigation
+
+Three bottom tabs — **Home**, **Cal**, **Insights** — standard iOS height, icon
+plus a small label, nothing that eats the timeline.
+
+- **Home** is unchanged, minus the Insights link in its header, which became a
+  duplicate route the moment Insights had a tab.
+- **Cal** is new: **Day**, **Week** and **List** over the same data, plus a
+  **month day-picker** so reaching last Tuesday is one tap instead of six.
+  Days with events carry a dot, so an empty day is visible before you open it.
+  The week fetch serves all three modes, so switching costs no request.
+- **Week view** puts seven days on one 24h axis. Blocks carry no text at that
+  width — the point is the shape of the week, not the detail of one feed. Tap a
+  column header for that day, a block to edit it.
+- **Insights** was already built, so the tab points at the real screen rather
+  than a placeholder. Say the word if you wanted it blank.
+
+The month grid is always 42 cells so its height never changes as you page
+through months, and `src/month.test.mjs` covers year rollover, leap years,
+Sunday-aligned rows and week labels that span two months.
+
 ### What is actually left
 
 **Every running timer is visible on the home screen.** Deliberately not a nudge

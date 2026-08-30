@@ -1,16 +1,16 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
-import { Events } from '../src/api';
-import Bars, { Stat } from '../src/Bars';
-import { cached } from '../src/cache';
-import { addDays, dayBounds, todayKey } from '../src/days';
-import { volume } from '../src/format';
-import OfflineBar from '../src/OfflineBar';
-import { useSession } from '../src/session';
-import { summary } from '../src/stats';
-import { c, space, types } from '../src/theme';
-import { ErrorNote, s } from '../src/ui';
+import { Events } from '../../src/api';
+import Bars, { Stat } from '../../src/Bars';
+import { cached } from '../../src/cache';
+import { addDays, dayBounds, todayKey } from '../../src/days';
+import { volume } from '../../src/format';
+import OfflineBar from '../../src/OfflineBar';
+import { useSession } from '../../src/session';
+import { summary } from '../../src/stats';
+import { c, space, types } from '../../src/theme';
+import { ErrorNote, s } from '../../src/ui';
 
 const RANGES = [7, 14, 30];
 
