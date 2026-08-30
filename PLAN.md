@@ -634,9 +634,16 @@ for those the two are the same thing.
 drawn faded across its whole span with the stretches it was actually nursing
 picked out solid, so a 19-minute feed spread over 105 minutes reads as exactly
 that. This needs `payload.segments` — `[{side, from, to}]`, appended whenever a
-side is banked — because per-side totals alone cannot say *when*. Events without
-segments (everything imported, every instant event) draw solid, which is right
-for them.
+side is banked — because per-side totals alone cannot say *when*. **A block is only as tall as the time it represents.** A nursing feed occupies
+its nursing time on the axis, not the span it happened to cover — 19 minutes of
+nursing spread over 105 reads as 19. The exception is a feed that recorded
+segments: there the real span is drawn faded with the nursing stretches picked
+out inside it, because then there is something worth seeing. Everything imported
+and every instant event has no segments and draws solid, which is right for them.
+
+This matters because the start time is the editable, meaningful end of a feed —
+you correct when it began — while the recorded end is just when Save was pressed.
+Sizing blocks by the span made a corrected start look like a longer feed.
 
 **Correcting the start time therefore has to land in the total.** Moving the
 start back ten minutes shifts the *running segment* back with it, so the side

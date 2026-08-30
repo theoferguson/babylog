@@ -67,3 +67,50 @@ assert.deepEqual(by(forward).a, by(backward).a);
 assert.deepEqual(layout([], { tz: NY }), []);
 
 console.log('OK  timelineLayout.js');
+
+// --- how tall a block is -----------------------------------------------------
+import { visibleSpanSec } from './timelineLayout.js';
+
+const feed = (extra) => ({
+  type: 'feed', tz: NY, started_at: at(17, 30),
+  payload: { method: 'breast', right_sec: 4 * 60, left_sec: 15 * 60 }, ...extra,
+});
+
+// A paused feed with no segment history is drawn as its nursing time, not the
+// span it happened to cover -- otherwise 19 minutes of nursing reads as 105.
+assert.equal(visibleSpanSec(feed({ ended_at: at(19, 15), duration_sec: 19 * 60 })), 19 * 60);
+
+// With segments there is something worth showing, so the real span is drawn and
+// the nursing stretches are picked out inside it.
+assert.equal(
+  visibleSpanSec(feed({
+    ended_at: at(19, 15),
+    duration_sec: 19 * 60,
+    payload: {
+      method: 'breast', right_sec: 4 * 60, left_sec: 15 * 60,
+      segments: [
+        { side: 'R', from: at(17, 30), to: at(17, 34) },
+        { side: 'L', from: at(19, 0), to: at(19, 15) },
+      ],
+    },
+  })),
+  105 * 60,
+);
+
+// A single stretch is not worth fading, so it uses nursing time like any other.
+assert.equal(
+  visibleSpanSec(feed({
+    ended_at: at(17, 49), duration_sec: 19 * 60,
+    payload: { method: 'breast', right_sec: 19 * 60,
+               segments: [{ side: 'R', from: at(17, 30), to: at(17, 49) }] },
+  })),
+  19 * 60,
+);
+
+// Sleep and bottle are unaffected: for them the two numbers are the same thing.
+assert.equal(visibleSpanSec({ type: 'sleep', started_at: at(1, 0), ended_at: at(2, 30),
+                              duration_sec: 90 * 60, payload: {} }), 90 * 60);
+assert.equal(visibleSpanSec({ type: 'feed', started_at: at(9, 0), ended_at: null,
+                              duration_sec: null, payload: { method: 'bottle' } }), 0);
+
+console.log('OK  visibleSpanSec');

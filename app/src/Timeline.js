@@ -1,7 +1,7 @@
 import { Pressable, Text, View } from 'react-native';
 import { summarize, timeOfDay } from './format';
 import { c, styleFor } from './theme';
-import { layout } from './timelineLayout';
+import { layout, visibleSpanSec } from './timelineLayout';
 
 const HOUR = 44; // px per hour
 const GUTTER = 44;
@@ -85,8 +85,7 @@ export default function Timeline({ events, units, tz, onPress }) {
               {segmentsFor(e)?.map((seg, i) => {
                 const from = new Date(seg.from).getTime();
                 const to = new Date(seg.to).getTime();
-                const span = new Date(e.ended_at || e.started_at).getTime()
-                  - new Date(e.started_at).getTime();
+                const span = visibleSpanSec(e) * 1000;
                 if (span <= 0) return null;
                 const topPct = ((from - new Date(e.started_at).getTime()) / span) * 100;
                 const hPct = ((to - from) / span) * 100;
