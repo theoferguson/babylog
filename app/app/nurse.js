@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Events, deviceTz } from '../src/api';
+import DateTimeField from '../src/DateTimeField';
 import { clock } from '../src/format';
 import * as local from '../src/localTimer';
 import OfflineBar from '../src/OfflineBar';
@@ -66,7 +67,9 @@ export default function Nurse() {
   // Server skew corrects a server-issued running_since. A local timer's
   // running_since came from this device's clock, so adding skew would make it
   // start at zero (or jump) for the length of the drift.
-  const now = useNow(!!view?.running_side) + (offlineState ? 0 : skewMs);
+  // Ticks whenever a feed is open, not only while a side runs: the feed keeps
+  // getting longer while it is paused.
+  const now = useNow(!!view) + (offlineState ? 0 : skewMs);
 
   useEffect(() => {
     if (view && !notesDirty) setNotes(view.notes || '');
@@ -254,7 +257,9 @@ export default function Nurse() {
   const checking = !loaded && !offlineState;
 
   const secs = (side) => (view ? local.secsFor(view, side, now) : 0);
-  const totalSecs = secs('R') + secs('L');
+  const totalSecs = view
+    ? Math.max(0, Math.round((now - new Date(view.started_at).getTime()) / 1000))
+    : 0;
 
   // Correcting the start time works whether the timer is running or paused --
   // the side accumulators are independent of it, so nothing is lost either way.
@@ -320,20 +325,7 @@ export default function Nurse() {
             </Text>
           </Pressable>
           {editStart ? (
-            <View style={[s.row, { gap: 8, flexWrap: 'wrap', justifyContent: 'center' }]}>
-              {[-30, -15, -5, 5, 15, 30].map((m) => (
-                <Button
-                  key={m}
-                  title={m > 0 ? `+${m}m` : `${m}m`}
-                  tone="plain"
-                  disabled={busy}
-                  onPress={() =>
-                    changeStart(new Date(new Date(view.started_at).getTime() + m * 60000))
-                  }
-                  style={{ paddingVertical: 8, paddingHorizontal: 12 }}
-                />
-              ))}
-            </View>
+            <DateTimeField value={new Date(view.started_at)} onChange={changeStart} />
           ) : null}
 
           <TextInput
