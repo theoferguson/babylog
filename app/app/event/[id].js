@@ -23,7 +23,6 @@ export default function EditEvent() {
   const [payload, setPayload] = useState({});
   const [notes, setNotes] = useState('');
   const [startedAt, setStartedAt] = useState(null);
-  const [endedAt, setEndedAt] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -35,7 +34,6 @@ export default function EditEvent() {
         setPayload(e.payload || {});
         setNotes(e.notes || '');
         setStartedAt(new Date(e.started_at));
-        setEndedAt(e.ended_at ? new Date(e.ended_at) : null);
       } catch (err) {
         setError(err);
       }
@@ -46,15 +44,7 @@ export default function EditEvent() {
     setBusy(true);
     setError(null);
     try {
-      await Events.update(id, {
-        payload,
-        notes,
-        started_at: startedAt.toISOString(),
-        // Typing more minutes into a side means the feed lasted longer, not that
-        // the entry is invalid. Stretch the end to fit rather than making the
-        // arithmetic the user's problem.
-        ...(effectiveEnd ? { ended_at: effectiveEnd.toISOString() } : {}),
-      });
+      await Events.update(id, { payload, notes, started_at: startedAt.toISOString() });
       router.back();
     } catch (e) {
       setError(e);
@@ -98,17 +88,10 @@ export default function EditEvent() {
   const shift = (m) => setStartedAt((d) => new Date(d.getTime() + m * 60000));
   const isBreast = event.type === 'feed' && payload.method === 'breast';
 
+  // A nursing feed lasts as long as the timer ran. Nothing about the recorded
+  // end constrains that, so the sides are free to be whatever they were.
   const sidesSec = (payload.right_sec || 0) + (payload.left_sec || 0);
-  // The feed is at least as long as the time spent on the two sides.
-  const minEnd = startedAt ? new Date(startedAt.getTime() + sidesSec * 1000) : null;
-  const effectiveEnd =
-    endedAt && minEnd ? (minEnd > endedAt ? minEnd : endedAt) : endedAt || minEnd;
-  const stretched = endedAt && minEnd && minEnd > endedAt;
-  // Sides longer than the time since it started would put the end in the future.
-  const impossible = effectiveEnd && effectiveEnd > new Date(Date.now() + 60000);
-  const durationMin = effectiveEnd && startedAt
-    ? Math.round((effectiveEnd - startedAt) / 60000)
-    : null;
+  const durationMin = isBreast ? Math.round(sidesSec / 60) : null;
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>

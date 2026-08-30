@@ -169,18 +169,10 @@ class EventSerializer(serializers.ModelSerializer):
         if start and start > timezone.now() + timedelta(minutes=5):
             raise serializers.ValidationError("started_at is in the future")
 
-        # Nursing sides cannot add up to more than the feed itself lasted. This
-        # is reachable two ways: dragging the start time forward on a running
-        # timer, and typing minutes by hand in the editor. Neither should be able
-        # to produce a feed whose sides exceed its own wall clock.
-        if kind == Event.FEED and payload.get("method") == "breast" and start:
-            sides = (payload.get("right_sec") or 0) + (payload.get("left_sec") or 0)
-            finish = end or timezone.now()
-            span = (finish - start).total_seconds()
-            # A minute of slack: imported feeds are recorded to whole minutes.
-            if sides > span + 60:
-                raise serializers.ValidationError(
-                    "the sides add up to more time than the feed lasted")
+        # No span check for nursing. `started_at` only says where the feed sits
+        # on the calendar and `ended_at` is just when Save was pressed, so the
+        # gap between them is not a quantity the side times can contradict. A
+        # feed lasts as long as the timer ran, full stop.
 
         baby = attrs.get("baby", getattr(self.instance, "baby", None))
         if baby is None and kind != Event.PUMP:

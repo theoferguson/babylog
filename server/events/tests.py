@@ -783,15 +783,18 @@ class RunningFeedEditTests(APITestCase):
         self.assertEqual(r.status_code, 200, r.json())
         self.assertEqual(r.json()["payload"]["left_sec"], 12 * 60)
 
-    def test_start_time_cannot_be_dragged_past_the_time_already_recorded(self):
+    def test_the_start_time_can_be_moved_anywhere_in_the_past(self):
         self.tick("start", "R", self.t0)
         self.tick("stop", at=self.t0 + timedelta(minutes=25))
-        # 25 minutes are banked; a start time two minutes ago cannot contain them.
-        too_late = (timezone.now() - timedelta(minutes=2)).isoformat()
-        r = self.client.patch(f"/api/events/{self.ev}/", {"started_at": too_late},
-                              format="json")
-        self.assertEqual(r.status_code, 400)
-        self.assertIn("sides", str(r.json()).lower())
+        # started_at only pins the feed on the calendar, so moving it cannot
+        # contradict the 25 minutes already on the clock.
+        r = self.client.patch(
+            f"/api/events/{self.ev}/",
+            {"started_at": (timezone.now() - timedelta(minutes=2)).isoformat()},
+            format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["payload"]["right_sec"], 25 * 60)
+        self.assertEqual(r.json()["duration_sec"], 25 * 60)
 
     def test_start_time_cannot_be_in_the_future(self):
         soon = (timezone.now() + timedelta(hours=1)).isoformat()
@@ -799,19 +802,16 @@ class RunningFeedEditTests(APITestCase):
                               format="json")
         self.assertEqual(r.status_code, 400)
 
-    def test_editor_cannot_type_more_side_minutes_than_the_feed_lasted(self):
+    def test_side_minutes_can_be_edited_freely(self):
         self.tick("start", "R", self.t0)
-        r = self.client.post(f"/api/events/{self.ev}/finish/",
-                             {"at": (self.t0 + timedelta(minutes=20)).isoformat()},
-                             format="json")
-        self.assertEqual(r.status_code, 200)
-        # A 20-minute feed cannot have 45 minutes of nursing in it.
-        bad = self.client.patch(f"/api/events/{self.ev}/", {
+        self.client.post(f"/api/events/{self.ev}/finish/",
+                         {"at": (self.t0 + timedelta(minutes=20)).isoformat()},
+                         format="json")
+        # The recorded end does not cap the sides: it is only when Save happened.
+        r = self.client.patch(f"/api/events/{self.ev}/", {
             "payload": {"method": "breast", "right_sec": 45 * 60}}, format="json")
-        self.assertEqual(bad.status_code, 400)
-        ok = self.client.patch(f"/api/events/{self.ev}/", {
-            "payload": {"method": "breast", "right_sec": 18 * 60}}, format="json")
-        self.assertEqual(ok.status_code, 200, ok.json())
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["duration_sec"], 45 * 60)
 
     def test_notes_can_be_edited_while_running(self):
         self.tick("start", "R", self.t0)
@@ -937,13 +937,13 @@ class FeedStretchTests(APITestCase):
         self.assertEqual(r.status_code, 200, r.json())
         self.assertEqual(r.json()["duration_sec"], 30 * 60)
 
-    def test_growing_a_side_without_the_end_is_still_refused(self):
-        # The invariant still holds for anything that does not send a new end.
+    def test_growing_a_side_alone_is_accepted(self):
+        # Nothing needs to be stretched to accommodate it any more.
         r = self.client.patch(f"/api/events/{self.ev}/", {
             "payload": {"method": "breast", "right_sec": 18 * 60, "left_sec": 12 * 60}},
             format="json")
-        self.assertEqual(r.status_code, 400)
-        self.assertIn("sides", str(r.json()).lower())
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["duration_sec"], 30 * 60)
 
     def test_shrinking_a_side_shortens_the_duration_but_not_the_span(self):
         # Duration is nursing time, so cutting the sides cuts it. The recorded

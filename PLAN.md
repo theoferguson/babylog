@@ -667,16 +667,17 @@ which is right: nothing was counting during that stretch. Done server-side, in
 too. Both work whether the timer is running or paused, because the side
 accumulators are independent of `started_at`.
 
-**Editing the side times stretches the feed rather than refusing the edit.** If
-you type 18 + 12 minutes into a feed recorded as 21, the end moves out to fit and
-the screen says so — "Feed lasted 30m — extended to fit the side times you
-entered". Shrinking a side leaves the length alone, because sides shorter than
-the feed just mean a pause. Only genuinely impossible input is blocked: side
-times adding up to more than the time since the feed started would put its end in
-the future.
+**Side times are edited freely.** Type whatever the two sides were; the feed
+lasts that long and the screen says so. There is no coupling to the recorded end,
+because there is nothing to couple to.
 
-The server invariant is unchanged and still enforced — **nursing sides can never
-add up to more time than the feed itself lasted.** That was reachable two ways
+There was briefly a rule that nursing sides could not exceed `ended_at -
+started_at`, and a client workaround that silently stretched the end to satisfy
+it. Both are gone. The rule assumed the span was a real quantity — but
+`started_at` only pins the feed on the calendar and `ended_at` is just when Save
+was pressed, so their difference is not something the side times can contradict.
+The guard remains for sleep and bottle feeds, where the span genuinely is the
+duration. That was reachable two ways
 before — dragging the start time forward on a running timer, and typing minutes
 by hand in the event editor, which had no check at all. Both are now 400s.
 
