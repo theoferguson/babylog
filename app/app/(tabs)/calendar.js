@@ -85,12 +85,26 @@ export default function Calendar() {
   const isToday = day === todayKey(tz);
   const openEvent = (e) => router.push(e.in_progress ? '/nurse' : `/event/${e.id}`);
 
+  // The date and the mode toggle stay pinned while scrolling: a day of 20+
+  // events scrolls the heading away, and a list of bare times then says nothing
+  // about which day you are reading.
   return (
     <ScrollView
       style={s.screen}
-      contentContainerStyle={{ padding: space, paddingTop: insets.top + 8, paddingBottom: 32 }}
+      contentContainerStyle={{ paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={c.muted} />}
+      stickyHeaderIndices={[0]}
     >
+      <View
+        style={{
+          paddingTop: insets.top + 8,
+          paddingHorizontal: space,
+          paddingBottom: 10,
+          backgroundColor: c.bg,
+          borderBottomWidth: 1,
+          borderBottomColor: c.border,
+        }}
+      >
       <View style={[s.row, { justifyContent: 'space-between' }]}>
         <Pressable onPress={() => setPicking(true)} accessibilityRole="button"
                    accessibilityLabel="Choose a date"
@@ -103,7 +117,7 @@ export default function Calendar() {
         </Pressable>
       </View>
 
-      <View style={[s.row, { gap: 8, marginTop: 12 }]}>
+      <View style={[s.row, { gap: 8, marginTop: 10 }]}>
         {[['day', 'Day'], ['week', 'Week'], ['list', 'List']].map(([v, label]) => (
           <Pressable
             key={v}
@@ -134,7 +148,9 @@ export default function Calendar() {
           <Text style={{ fontSize: 22, color: isToday ? c.border : c.muted }}>›</Text>
         </Pressable>
       </View>
+      </View>
 
+      <View style={{ paddingHorizontal: space }}>
       <OfflineBar stale={stale} onFlushed={load} />
       <ErrorNote error={error} />
 
@@ -157,9 +173,12 @@ export default function Calendar() {
       ) : (
         <>
           <Rollup events={dayEvents} units={units} />
-          <DayList events={dayEvents} units={units} onPress={openEvent} />
+          <DayList events={dayEvents} units={units} onPress={openEvent}
+                   label={dayLabel(day, tz)} />
         </>
       )}
+
+      </View>
 
       <DayPicker
         visible={picking}
@@ -191,10 +210,21 @@ function Rollup({ events, units }) {
   );
 }
 
-function DayList({ events, units, onPress }) {
+function DayList({ events, units, onPress, label }) {
   const rows = [...events].sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
   return (
     <View style={{ marginTop: 8 }}>
+      {label ? (
+        <Text
+          style={{
+            fontSize: 12, fontWeight: '700', color: c.muted,
+            textTransform: 'uppercase', letterSpacing: 0.5,
+            paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: c.border,
+          }}
+        >
+          {label}
+        </Text>
+      ) : null}
       {rows.map((e) => {
         const t = styleFor(e);
         return (
