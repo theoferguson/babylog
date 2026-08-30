@@ -83,7 +83,13 @@ Points at `https://babylog-app.fly.dev` by default. For a local server:
 EXPO_PUBLIC_API_URL=http://localhost:8000 npx expo start
 ```
 
-Formatting logic has a plain-node check: `node src/format.test.mjs`.
+All app checks: `npm run check` (7 unit suites plus a static guard).
+
+`check-globals.mjs` catches identifiers that exist as **browser** globals but not
+in Hermes — `event`, `name`, `status`, `location` and friends. `event.id` once
+shipped a crash to TestFlight this way: on web it silently resolved to
+`window.event`, so every web build and every export passed, and the bug only
+appeared on a phone.
 Web build: `npx expo export --platform web`.
 
 | file | |

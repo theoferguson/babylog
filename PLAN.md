@@ -970,6 +970,13 @@ week strip is enough at ~22 events/day), CRDT sync (last-write-wins is fine for
 two people), dark mode (tokens are in one file, so it is a 30-minute change when
 the 3am screen blinds you), Android widgets, Apple Watch.
 
+**A bug class worth knowing about:** the web build cannot catch an undefined
+identifier that happens to be a browser global. `event.id` in the nurse screen
+resolved to `window.event` on web and threw on Hermes, so it passed every check
+and crashed on the phone. `app/check-globals.mjs` now greps for that class and
+runs in `npm run check`; it found a second instance the moment it was written
+(a false positive in prose, which is why it has a self-test of its own).
+
 **One piece of debt worth naming:** the import draft lives in client memory, so a
 refresh mid-review loses it and you re-upload. Fine at 224 rows; revisit only if
 you ever import something big.
