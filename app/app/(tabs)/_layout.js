@@ -1,6 +1,14 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Tabs } from 'expo-router';
+import { scrollToTop } from '../../src/scrollTop';
 import { c } from '../../src/theme';
+
+// Re-tapping the active tab returns it to the top rather than doing nothing.
+const toTop = (key) => ({ navigation }) => ({
+  tabPress: () => {
+    if (navigation.isFocused()) scrollToTop(key);
+  },
+});
 
 // A compact bottom bar: icon plus a small label, standard iOS height, nothing
 // that eats into the timeline.
@@ -23,6 +31,7 @@ export default function TabLayout() {
     >
       <Tabs.Screen
         name="index"
+        listeners={toTop('index')}
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size - 2} color={color} />,
@@ -30,6 +39,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="calendar"
+        listeners={toTop('calendar')}
         options={{
           title: 'Cal',
           tabBarIcon: ({ color, size }) => (
@@ -39,6 +49,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="insights"
+        listeners={toTop('insights')}
         options={{
           title: 'Insights',
           tabBarIcon: ({ color, size }) => (

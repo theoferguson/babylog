@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Events } from '../../src/api';
 import Bars, { Stat } from '../../src/Bars';
@@ -7,6 +7,7 @@ import { cached } from '../../src/cache';
 import { addDays, dayBounds, todayKey } from '../../src/days';
 import { volume } from '../../src/format';
 import OfflineBar from '../../src/OfflineBar';
+import { registerScroller } from '../../src/scrollTop';
 import { useSession } from '../../src/session';
 import { summary } from '../../src/stats';
 import { c, space, types } from '../../src/theme';
@@ -15,6 +16,8 @@ import { ErrorNote, s } from '../../src/ui';
 const RANGES = [7, 14, 30];
 
 export default function Insights() {
+  const scroller = useRef(null);
+  useEffect(() => registerScroller('insights', scroller), []);
   const { household } = useSession();
   const units = household?.units || 'metric';
   const tz = household?.timezone || 'UTC';
@@ -57,7 +60,7 @@ export default function Insights() {
     : 0;
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={{ padding: space, paddingBottom: 48 }}>
+    <ScrollView ref={scroller} style={s.screen} contentContainerStyle={{ padding: space, paddingBottom: 48 }}>
       <View style={[s.row, { gap: 8 }]}>
         {RANGES.map((n) => (
           <Pressable

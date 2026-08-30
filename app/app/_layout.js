@@ -2,6 +2,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import ErrorBoundary from '../src/ErrorBoundary';
 import { SessionProvider, useSession } from '../src/session';
 import '../src/outbox'; // registers the write queue with the API layer
 import { c } from '../src/theme';
@@ -52,9 +53,11 @@ function Gate() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <SessionProvider>
-        <Gate />
-      </SessionProvider>
+      <ErrorBoundary>
+        <SessionProvider>
+          <Gate />
+        </SessionProvider>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }

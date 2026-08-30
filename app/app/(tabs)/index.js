@@ -1,7 +1,8 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { registerScroller } from '../../src/scrollTop';
 import { Events } from '../../src/api';
 import { cached } from '../../src/cache';
 import OfflineBar from '../../src/OfflineBar';
@@ -18,6 +19,8 @@ import { useActiveEvents, useNow } from '../../src/useActive';
 import { clock } from '../../src/format';
 
 export default function Home() {
+  const scroller = useRef(null);
+  useEffect(() => registerScroller('index', scroller), []);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { household, babies, babyId, setBabyId } = useSession();
@@ -108,6 +111,7 @@ export default function Home() {
 
   return (
     <ScrollView
+      ref={scroller}
       style={s.screen}
       contentContainerStyle={{ padding: space, paddingTop: insets.top + 8, paddingBottom: 40 }}
       refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={c.muted} />}

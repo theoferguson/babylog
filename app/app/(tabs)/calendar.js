@@ -1,7 +1,8 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { registerScroller } from '../../src/scrollTop';
 import { Events } from '../../src/api';
 import { cached } from '../../src/cache';
 import DayPicker from '../../src/DayPicker';
@@ -18,6 +19,8 @@ import { ErrorNote, s } from '../../src/ui';
 // Day and week views over the same data, with a month picker so reaching last
 // Tuesday is one tap rather than six.
 export default function Calendar() {
+  const scroller = useRef(null);
+  useEffect(() => registerScroller('calendar', scroller), []);
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { household } = useSession();
@@ -90,6 +93,7 @@ export default function Calendar() {
   // about which day you are reading.
   return (
     <ScrollView
+      ref={scroller}
       style={s.screen}
       contentContainerStyle={{ paddingBottom: 32 }}
       refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={c.muted} />}
