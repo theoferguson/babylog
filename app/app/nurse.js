@@ -2,7 +2,6 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Events, deviceTz } from '../src/api';
-import DateTimeField from '../src/DateTimeField';
 import { clock } from '../src/format';
 import * as local from '../src/localTimer';
 import OfflineBar from '../src/OfflineBar';
@@ -306,7 +305,20 @@ export default function Nurse() {
             </Text>
           </Pressable>
           {editStart ? (
-            <DateTimeField value={new Date(view.started_at)} onChange={changeStart} />
+            <View style={[s.row, { gap: 8, flexWrap: 'wrap', justifyContent: 'center' }]}>
+              {[-30, -15, -5, 5, 15, 30].map((m) => (
+                <Button
+                  key={m}
+                  title={m > 0 ? `+${m}m` : `${m}m`}
+                  tone="plain"
+                  disabled={busy}
+                  onPress={() =>
+                    changeStart(new Date(new Date(view.started_at).getTime() + m * 60000))
+                  }
+                  style={{ paddingVertical: 8, paddingHorizontal: 12 }}
+                />
+              ))}
+            </View>
           ) : null}
 
           <TextInput
