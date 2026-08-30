@@ -2,11 +2,10 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { createElement, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { c } from './theme';
-import { s } from './ui';
+import { Button, s } from './ui';
 
-// A date and a time, for logging something that happened yesterday. The quick
-// -5/-15/-30m chips stay the fast path; this is the escape hatch when the event
-// was not today.
+// A date and a time, for logging something that happened yesterday, or for
+// correcting the start of a feed that is already running.
 
 const pad = (n) => String(n).padStart(2, '0');
 const dateStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -27,6 +26,12 @@ function withTime(current, hm) {
 
 export default function DateTimeField({ value, onChange, maxDate = new Date() }) {
   const [picking, setPicking] = useState(null); // 'date' | 'time' | null
+  // iOS fires onChange on every scroll tick. Holding a draft means one update
+  // when you are done, instead of one per tick -- which on a screen that PATCHes
+  // the server was a request per flick of the wheel.
+  const [draft, setDraft] = useState(null);
+
+  const commit = (next) => onChange(next > maxDate ? maxDate : next);
 
   if (Platform.OS === 'web') {
     const input = (type, val, onInput) =>
@@ -42,41 +47,65 @@ export default function DateTimeField({ value, onChange, maxDate = new Date() })
       });
     return (
       <View style={[s.row, { gap: 8 }]}>
-        {input('date', dateStr(value), (v) => onChange(withDate(value, v)))}
-        {input('time', timeStr(value), (v) => onChange(withTime(value, v)))}
+        {input('date', dateStr(value), (v) => commit(withDate(value, v)))}
+        {input('time', timeStr(value), (v) => commit(withTime(value, v)))}
       </View>
     );
   }
 
+  const open = (mode) => {
+    setDraft(value);
+    setPicking(mode);
+  };
+
   return (
-    <View style={[s.row, { gap: 8 }]}>
-      {[
-        ['date', value.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })],
-        ['time', value.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })],
-      ].map(([mode, label]) => (
-        <Pressable
-          key={mode}
-          onPress={() => setPicking(mode)}
-          accessibilityRole="button"
-          accessibilityLabel={`Change ${mode}`}
-          style={[s.input, { flex: 1 }]}
-        >
-          <Text style={{ color: c.text, fontSize: 16 }}>{label}</Text>
-        </Pressable>
-      ))}
+    <View style={{ gap: 8 }}>
+      <View style={[s.row, { gap: 8 }]}>
+        {[
+          ['date', value.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })],
+          ['time', value.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })],
+        ].map(([mode, label]) => (
+          <Pressable
+            key={mode}
+            onPress={() => open(mode)}
+            accessibilityRole="button"
+            accessibilityLabel={`Change ${mode}`}
+            style={[s.input, { flex: 1 }]}
+          >
+            <Text style={{ color: c.text, fontSize: 16 }}>{label}</Text>
+          </Pressable>
+        ))}
+      </View>
+
       {picking ? (
-        <DateTimePicker
-          value={value}
-          mode={picking}
-          maximumDate={picking === 'date' ? maxDate : undefined}
-          onChange={(event, picked) => {
-            setPicking(null);
-            if (event.type === 'dismissed' || !picked) return;
-            // Never let a future time through: an event cannot have happened yet,
-            // and the server rejects it anyway.
-            onChange(picked > maxDate ? maxDate : picked);
-          }}
-        />
+        <View style={{ gap: 8 }}>
+          <DateTimePicker
+            value={draft || value}
+            mode={picking}
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            maximumDate={picking === 'date' ? maxDate : undefined}
+            onChange={(e, picked) => {
+              // Android shows a modal dialog and reports once, set or dismissed.
+              if (Platform.OS !== 'ios') {
+                setPicking(null);
+                if (e.type === 'set' && picked) commit(picked);
+                return;
+              }
+              // iOS renders inline and reports continuously. Unmounting here --
+              // which is what the previous version did -- tears down the native
+              // view mid-gesture and takes the app with it.
+              if (picked) setDraft(picked);
+            }}
+          />
+          {Platform.OS === 'ios' ? (
+            <View style={[s.row, { gap: 8 }]}>
+              <Button title="Cancel" tone="plain" style={{ flex: 1 }}
+                      onPress={() => setPicking(null)} />
+              <Button title="Done" style={{ flex: 1 }}
+                      onPress={() => { setPicking(null); commit(draft || value); }} />
+            </View>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );

@@ -250,7 +250,7 @@ export default function Nurse() {
         await goLocal({ ...offlineState, started_at: next.toISOString() });
         return;
       }
-      await Events.update(event.id, { started_at: next.toISOString() });
+      await Events.update(remote.id, { started_at: next.toISOString() });
     });
 
   return (

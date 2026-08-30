@@ -2,7 +2,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { createElement, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { c } from './theme';
-import { s } from './ui';
+import { Button, s } from './ui';
 
 // Dates are stored as 'YYYY-MM-DD' with no time, so they are parsed as UTC to
 // avoid a birthday shifting a day for anyone west of Greenwich.
@@ -11,6 +11,7 @@ const fmt = (d) => d.toISOString().slice(0, 10);
 
 export default function DateField({ label, value, onChange, maximumDate }) {
   const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(null);
 
   // On the web the browser's own date input is better than anything worth
   // building, and react-native-web renders DOM elements directly.
@@ -45,15 +46,31 @@ export default function DateField({ label, value, onChange, maximumDate }) {
         </Text>
       </Pressable>
       {open ? (
-        <DateTimePicker
-          value={parse(value)}
-          mode="date"
-          maximumDate={maximumDate}
-          onChange={(event, picked) => {
-            setOpen(Platform.OS === 'ios' && event.type !== 'dismissed' ? false : false);
-            if (event.type !== 'dismissed' && picked) onChange(fmt(picked));
-          }}
-        />
+        <View style={{ gap: 8 }}>
+          <DateTimePicker
+            value={draft || parse(value)}
+            mode="date"
+            display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+            maximumDate={maximumDate}
+            onChange={(event, picked) => {
+              if (Platform.OS !== 'ios') {
+                setOpen(false);
+                if (event.type === 'set' && picked) onChange(fmt(picked));
+                return;
+              }
+              // iOS reports on every scroll tick; unmounting mid-gesture crashes.
+              if (picked) setDraft(picked);
+            }}
+          />
+          {Platform.OS === 'ios' ? (
+            <View style={[s.row, { gap: 8 }]}>
+              <Button title="Cancel" tone="plain" style={{ flex: 1 }}
+                      onPress={() => setOpen(false)} />
+              <Button title="Done" style={{ flex: 1 }}
+                      onPress={() => { setOpen(false); onChange(fmt(draft || parse(value))); }} />
+            </View>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
