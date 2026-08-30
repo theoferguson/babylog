@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.core.cache import cache
 from django.core.management import call_command
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -871,3 +871,41 @@ class SingleRunningFeedTests(APITestCase):
             "payload": {"method": "breast"}}, format="json")
         self.assertEqual(r.status_code, 201)
         self.assertEqual(len(self.client.get("/api/events/active/").json()["events"]), 2)
+
+
+class SessionCookieDoesNotBreakTheApiTests(TestCase):
+    """The web app is served from the same host as the API, so a browser that has
+    logged into /admin/ sends that session cookie with every API call. It must be
+    ignored rather than triggering CSRF enforcement."""
+
+    def setUp(self):
+        self.user = User.objects.create_user("theo-csrf", password="pw-for-tests-only",
+                                             is_staff=True, is_superuser=True)
+        hh = Household.objects.create(name="Ferguson")
+        Membership.objects.create(user=self.user, household=hh)
+
+    def test_signing_in_works_while_holding_an_admin_session(self):
+        c = Client(enforce_csrf_checks=True)
+        c.login(username="theo-csrf", password="pw-for-tests-only")
+        self.assertIn("sessionid", c.cookies)
+        r = c.post("/api/auth/token/",
+                   {"username": "theo-csrf", "password": "pw-for-tests-only"},
+                   content_type="application/json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertIn("token", r.json())
+
+    def test_writes_work_with_a_token_while_holding_an_admin_session(self):
+        c = Client(enforce_csrf_checks=True)
+        c.login(username="theo-csrf", password="pw-for-tests-only")
+        token = c.post("/api/auth/token/",
+                       {"username": "theo-csrf", "password": "pw-for-tests-only"},
+                       content_type="application/json").json()["token"]
+        baby = c.post("/api/babies/", {"name": "Henry"}, content_type="application/json",
+                      HTTP_AUTHORIZATION=f"Token {token}")
+        self.assertEqual(baby.status_code, 201, baby.content)
+
+    def test_a_session_cookie_alone_does_not_authenticate(self):
+        # The cookie must be inert, not a second way in.
+        c = Client(enforce_csrf_checks=True)
+        c.login(username="theo-csrf", password="pw-for-tests-only")
+        self.assertEqual(c.get("/api/events/").status_code, 401)

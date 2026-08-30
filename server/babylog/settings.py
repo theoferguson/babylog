@@ -133,9 +133,14 @@ DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL") or (
 )
 
 REST_FRAMEWORK = {
+    # Token only, deliberately. SessionAuthentication would pick up the /admin/
+    # session cookie -- which the browser now sends, because the web app is
+    # served from the same host as the API -- and then enforce CSRF on every
+    # request, including sign-in. A token in an Authorization header is never
+    # attached by the browser on its own, so this is also structurally immune to
+    # CSRF rather than defended against it.
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_THROTTLE_RATES": {"register": "20/hour"},
