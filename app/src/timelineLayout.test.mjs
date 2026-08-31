@@ -114,3 +114,36 @@ assert.equal(visibleSpanSec({ type: 'feed', started_at: at(9, 0), ended_at: null
                               duration_sec: null, payload: { method: 'bottle' } }), 0);
 
 console.log('OK  visibleSpanSec');
+
+// --- stretches must agree with the totals ------------------------------------
+import { usableSegments } from './timelineLayout.js';
+
+const paused = (sides, segs) => ({
+  type: 'feed', tz: NY, started_at: at(17, 30), ended_at: at(19, 15),
+  duration_sec: sides.right_sec + sides.left_sec,
+  payload: { method: 'breast', ...sides, segments: segs },
+});
+
+// Honest data: two stretches adding up to the side totals.
+assert.ok(usableSegments(paused(
+  { right_sec: 4 * 60, left_sec: 15 * 60 },
+  [{ side: 'R', from: at(17, 30), to: at(17, 34) },
+   { side: 'L', from: at(19, 0), to: at(19, 15) }],
+)));
+
+// Sides edited by hand afterwards: the stretches now describe a run that did not
+// happen, so they are ignored rather than drawn.
+assert.equal(usableSegments(paused(
+  { right_sec: 12 * 60, left_sec: 10 * 60 },
+  [{ side: 'R', from: at(17, 30), to: at(17, 35) },
+   { side: 'L', from: at(18, 20), to: at(19, 15) }],
+)), null);
+
+// ...and the block then falls back to the nursing time, not the span.
+assert.equal(visibleSpanSec(paused(
+  { right_sec: 12 * 60, left_sec: 10 * 60 },
+  [{ side: 'R', from: at(17, 30), to: at(17, 35) },
+   { side: 'L', from: at(18, 20), to: at(19, 15) }],
+)), 22 * 60);
+
+console.log('OK  usableSegments');

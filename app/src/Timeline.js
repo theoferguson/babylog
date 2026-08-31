@@ -1,7 +1,7 @@
 import { Pressable, Text, View } from 'react-native';
 import { summarize, timeOfDay } from './format';
 import { c, styleFor } from './theme';
-import { layout, visibleSpanSec } from './timelineLayout';
+import { layout, usableSegments, visibleSpanSec } from './timelineLayout';
 
 const HOUR = 44; // px per hour
 const GUTTER = 44;
@@ -16,14 +16,6 @@ const MIN_BLOCK = 22;
 //
 // Placement uses each event's OWN recorded zone, not the viewer's, so a day
 // logged in another timezone still reads correctly after you fly home.
-// Only a paused nursing feed has stretches worth distinguishing; one unbroken
-// stretch is just a solid block.
-function segmentsFor(e) {
-  const segs = e.payload?.segments;
-  if (!Array.isArray(segs) || segs.length < 2 || !e.ended_at) return null;
-  return segs;
-}
-
 export default function Timeline({ events, units, tz, onPress }) {
   const blocks = layout(events, { tz, hourPx: HOUR, minPx: MIN_BLOCK });
   return (
@@ -75,14 +67,14 @@ export default function Timeline({ events, units, tz, onPress }) {
                   // segments (imported rows, instant events) it is solid
                   // throughout, which is what those are.
                   backgroundColor: t.fill,
-                  opacity: segmentsFor(e) ? 0.35 : 1,
+                  opacity: usableSegments(e) ? 0.35 : 1,
                   borderRadius: 8,
                   justifyContent: 'center',
                   paddingHorizontal: 8,
                   overflow: 'hidden',
                 }}
               />
-              {segmentsFor(e)?.map((seg, i) => {
+              {usableSegments(e)?.map((seg, i) => {
                 const from = new Date(seg.from).getTime();
                 const to = new Date(seg.to).getTime();
                 const span = visibleSpanSec(e) * 1000;

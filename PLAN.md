@@ -634,7 +634,14 @@ for those the two are the same thing.
 drawn faded across its whole span with the stretches it was actually nursing
 picked out solid, so a 19-minute feed spread over 105 minutes reads as exactly
 that. This needs `payload.segments` — `[{side, from, to}]`, appended whenever a
-side is banked — because per-side totals alone cannot say *when*. **A block is only as tall as the time it represents.** A nursing feed occupies
+side is banked — because per-side totals alone cannot say *when*.
+
+**Stretches are dropped the moment they stop being true.** Editing the side
+totals by hand makes them describe a run that did not happen, so the server
+removes them on any update that changes `right_sec` or `left_sec`. The client
+independently ignores stretches whose lengths do not add up to the side totals,
+which is what stops already-saved bad data drawing a shape that contradicts its
+own duration. **A block is only as tall as the time it represents.** A nursing feed occupies
 its nursing time on the axis, not the span it happened to cover — 19 minutes of
 nursing spread over 105 reads as 19. The exception is a feed that recorded
 segments: there the real span is drawn faded with the nursing stretches picked

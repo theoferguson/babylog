@@ -136,6 +136,21 @@ class EventSerializer(serializers.ModelSerializer):
         A paused feed has nothing running, so its total is unaffected, which is
         correct: no side was counting during that stretch.
         """
+        # Editing the side totals by hand invalidates the recorded stretches:
+        # they describe a run that no longer matches the numbers. Keeping them
+        # would let the calendar draw a shape that contradicts the duration.
+        incoming = validated_data.get("payload")
+        if incoming is not None:
+            old = instance.payload or {}
+            changed = any(
+                (incoming.get(k) or 0) != (old.get(k) or 0)
+                for k in ("right_sec", "left_sec")
+            )
+            if changed and "segments" in incoming:
+                incoming = dict(incoming)
+                incoming.pop("segments", None)
+                validated_data["payload"] = incoming
+
         new_start = validated_data.get("started_at")
         if new_start and instance.in_progress and new_start != instance.started_at:
             payload = dict(validated_data.get("payload") or instance.payload or {})

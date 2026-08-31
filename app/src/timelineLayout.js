@@ -16,12 +16,23 @@ import { hourOffset } from './days.js';
 // segments: there the full span is drawn, faded, with the nursing stretches
 // picked out inside it, so the block has to be the real span.
 export function visibleSpanSec(e) {
-  const segs = e.payload?.segments;
-  if (Array.isArray(segs) && segs.length >= 2 && e.ended_at) {
-    return (new Date(e.ended_at) - new Date(e.started_at)) / 1000;
-  }
+  if (usableSegments(e)) return (new Date(e.ended_at) - new Date(e.started_at)) / 1000;
   if (e.duration_sec != null) return e.duration_sec;
   return e.ended_at ? (new Date(e.ended_at) - new Date(e.started_at)) / 1000 : 0;
+}
+
+// Stretches are only worth drawing when there is more than one AND they still
+// add up to the side totals. Editing the sides by hand makes the recorded
+// stretches describe a run that no longer happened; drawing them would show a
+// shape contradicting the duration, so they are ignored.
+export function usableSegments(e) {
+  const segs = e.payload?.segments;
+  if (!Array.isArray(segs) || segs.length < 2 || !e.ended_at) return null;
+  const covered = segs.reduce(
+    (a, s) => a + (new Date(s.to) - new Date(s.from)) / 1000, 0);
+  const sides = (e.payload?.right_sec || 0) + (e.payload?.left_sec || 0);
+  if (!sides || Math.abs(covered - sides) > 120) return null;
+  return segs;
 }
 
 export function layout(events, { tz, hourPx = 44, minPx = 22, gapPx = 2 } = {}) {
