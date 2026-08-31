@@ -988,6 +988,25 @@ The month grid is always 42 cells so its height never changes as you page
 through months, and `src/month.test.mjs` covers year rollover, leap years,
 Sunday-aligned rows and week labels that span two months.
 
+The bar is **not** a `Tabs` navigator. Every log form and the event editor are
+pushed screens with headers and back buttons, and a tab navigator above a stack
+hides its bar the moment you push — so the bar disappeared exactly when you
+wanted it. `src/TabBar.js` renders it as a sibling of the root `Stack` instead:
+present on every screen, forms included, hidden only on sign-in and join. Tabs
+`replace` rather than `push`, because a tab is a destination, not history;
+re-tapping the tab you are on still scrolls to the top. The stack also sets
+`headerBackTitle: 'Back'` — iOS otherwise labels the back button with the
+previous screen's title, which for a tab screen was the route group: "(tabs)".
+
+### Next feed
+
+`Household.feed_interval_min` (default 180, bounded 15–1440) drives a banner at
+the top of Home: when the next feed is expected, counted from when the last one
+**started** — nursing or bottle, both are `type=feed` — so a long session does
+not push the next one out by its own length. Overdue turns the card warm.
+Configurable in Settings (1.5h–4h). Nothing is scheduled or notified off it;
+that is Phase 7's job.
+
 ### What is actually left
 
 **Every running timer is visible on the home screen.** Deliberately not a nudge

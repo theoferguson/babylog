@@ -1,6 +1,6 @@
 // Plain node, no framework: node src/format.test.mjs
 import assert from 'node:assert/strict';
-import { ago, clock, summarize, toMl, volume } from './format.js';
+import { ago, clock, countdown, summarize, toMl, volume } from './format.js';
 
 const T = (s) => new Date(Date.UTC(2026, 7, 28, 12, 0, 0)).getTime() + s * 1000;
 const now = T(0);
@@ -40,3 +40,14 @@ assert.equal(
 );
 
 console.log('OK  format.js');
+
+// countdown -- the next-feed banner's only arithmetic.
+{
+  const t0 = Date.parse('2026-08-31T12:00:00Z');
+  assert.equal(countdown('2026-08-31T13:12:00Z', t0), 'in 1h 12m');
+  assert.equal(countdown('2026-08-31T12:25:00Z', t0), 'in 25m');
+  assert.equal(countdown('2026-08-31T11:35:00Z', t0), '25m ago');
+  assert.equal(countdown('2026-08-31T12:00:30Z', t0), 'now');
+  assert.equal(countdown('2026-08-31T10:00:00Z', t0), '2h 0m ago');
+}
+console.log('format: ok');

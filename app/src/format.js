@@ -11,6 +11,15 @@ export function ago(iso, now = Date.now()) {
   return d === 1 ? 'yesterday' : `${d}d ago`;
 }
 
+// "in 1h 12m" / "25m ago" -- the same phrasing as ago(), pointing forwards.
+export function countdown(iso, now = Date.now()) {
+  const secs = Math.round((new Date(iso).getTime() - now) / 1000);
+  const m = Math.floor(Math.abs(secs) / 60);
+  if (m < 1) return 'now';
+  const span = m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  return secs > 0 ? `in ${span}` : `${span} ago`;
+}
+
 export function clock(secs) {
   const s = Math.max(0, Math.floor(secs));
   const m = Math.floor(s / 60);

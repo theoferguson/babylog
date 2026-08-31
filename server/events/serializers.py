@@ -104,10 +104,15 @@ class UserSerializer(serializers.ModelSerializer):
 class HouseholdSerializer(serializers.ModelSerializer):
     babies = BabySerializer(many=True, read_only=True)
     members = UserSerializer(many=True, read_only=True)
+    # Bounded so a typo cannot produce a banner that is never due, or one that
+    # is permanently overdue.
+    feed_interval_min = serializers.IntegerField(min_value=15, max_value=1440,
+                                                 required=False)
 
     class Meta:
         model = Household
-        fields = ["id", "name", "units", "timezone", "babies", "members"]
+        fields = ["id", "name", "units", "timezone", "feed_interval_min", "babies",
+                  "members"]
 
 
 class EventSerializer(serializers.ModelSerializer):

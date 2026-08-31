@@ -100,8 +100,10 @@ function HouseholdCard({ household, busy, onSave }) {
   const [units, setUnits] = useState(household.units);
   const [zone, setZone] = useState(household.timezone);
   const [pickZone, setPickZone] = useState(false);
+  const [gap, setGap] = useState(household.feed_interval_min);
   const dirty =
-    name !== household.name || units !== household.units || zone !== household.timezone;
+    name !== household.name || units !== household.units || zone !== household.timezone ||
+    gap !== household.feed_interval_min;
 
   return (
     <View style={{ gap: 10 }}>
@@ -132,6 +134,31 @@ function HouseholdCard({ household, busy, onSave }) {
       <Text style={s.muted}>
         Display only — everything is stored in ml, g and cm whichever you pick, so switching
         never changes a recorded number.
+      </Text>
+
+      <Text style={s.body}>Expect a feed every</Text>
+      <View style={[s.row, { gap: 8, flexWrap: 'wrap' }]}>
+        {[90, 120, 150, 180, 210, 240].map((m) => (
+          <Pressable
+            key={m}
+            onPress={() => setGap(m)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: gap === m }}
+            style={{
+              paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14,
+              backgroundColor: gap === m ? c.accent : c.surface,
+              borderWidth: 1, borderColor: gap === m ? c.accent : c.border,
+            }}
+          >
+            <Text style={{ color: gap === m ? '#FFF' : c.text, fontWeight: '600' }}>
+              {m % 60 ? `${(m / 60).toFixed(1)}h` : `${m / 60}h`}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={s.muted}>
+        Counted from when the last feed started, nursing or bottle. Shown as a banner on Home;
+        nothing is scheduled off it.
       </Text>
 
       <Text style={s.body}>Home timezone</Text>
@@ -165,7 +192,7 @@ function HouseholdCard({ household, busy, onSave }) {
 
       {dirty ? (
         <Button title={busy ? 'Saving…' : 'Save household'} disabled={busy}
-                onPress={() => onSave({ name, units, timezone: zone })} />
+                onPress={() => onSave({ name, units, timezone: zone, feed_interval_min: gap })} />
       ) : null}
     </View>
   );
