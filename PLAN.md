@@ -1029,20 +1029,41 @@ with the tiering below, where a number that moves actually decides something.
 **Cost:** roughly a few dollars a month at ~15 logs a day. `count_tokens`
 before shipping if that matters; `effort` is the lever if it does.
 
-**Speech-to-text is on-device.** `expo-speech-recognition` uses the OS
-recogniser: free, no second API, and the audio never leaves the phone — which
-matters more here than usual, because the sentences are about an infant's
-health. Web falls back to the Web Speech API, and both fall back to the text
-field, which is also the accessible path and the one that works in a quiet room
-at 3am next to a sleeping baby.
+**The mic is the feature, not a later enhancement.** Typing "fed 20 minutes
+left side" is strictly worse than tapping the nurse tile — the tile is two taps
+and cannot be misheard. The entire reason this phase exists is the case where
+both hands are full and it is 3am, and that case is voice or it is nothing. So
+the text field is a *fallback*: the accessible path, the quiet-room path, and
+what happens when recognition fails. It is not a shipping milestone, and part 1
+is not done without the microphone.
 
-**Sequence it around the build cycle.** The recogniser is a native dependency,
-so the mic needs `eas build` + TestFlight, not an OTA push. Ship the pipeline
-first — endpoint, review screen, and a plain text field — over OTA, use it for
-a few days, and add the button in the next native build. That way the part that
-might be wrong (does the parse actually understand how you talk?) gets tested
-without waiting on a build, and the part that is merely fiddly rides along
-after.
+**Speech-to-text is on-device.** `expo-speech-recognition` wraps iOS
+`SFSpeechRecognizer` and Android `SpeechRecognizer` as a TurboModule — free, no
+second API, and the audio never leaves the phone, which matters more here than
+usual because the sentences are about an infant's health. It needs
+`NSSpeechRecognitionUsageDescription` and a microphone permission string in the
+app config.
+
+**It must be New-Architecture compatible, and the old ones are not.** babylog
+runs Fabric. `@react-native-voice/voice` and its generation *fail silently*
+under the New Architecture — no error, no transcript — which is exactly the
+class of bug that reaches TestFlight because every web build passes.
+`expo-speech-recognition` is a TurboModule, and that is the reason to pick it.
+
+**The build cost is paid once, not per iteration.** The recogniser is a native
+dependency, so this needs `eas build` rather than an OTA push — but only to get
+the module onto the phone. Take a **development build** first; after that the JS
+reloads over the wire as always, and the prompt, the review screen and the
+parsing all iterate at normal speed. One production build and submit when it
+works. That pipeline has already shipped to TestFlight twice, so it is one more
+turn of a crank that already turns.
+
+**Transcription error becomes the dominant failure mode**, ahead of extraction
+error — "four ounces" and "for ounces" are one phoneme apart, and the recogniser
+has no idea which one a bottle takes. That is an argument for the review screen,
+not against the feature: it is what catches a misheard number before it becomes
+a feed. It also means the eval, when it comes, has to be scored transcript-in
+rather than text-in, or it measures the easier half.
 
 **Explicitly not in part 1:** tiers, local or open-weight models, the router,
 the eval harness, streaming. Ship this, use it for a fortnight, and let the
