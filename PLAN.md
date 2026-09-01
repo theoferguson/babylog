@@ -870,6 +870,16 @@ Two consequences worth acting on now:
   from rolling median inter-feed interval. 109 rows over 10 days is thin but not
   nothing, and it's the same machinery. Do that one first.
 
+**Half of that third point has shipped, the easy half.** The next-feed banner
+exists, but off a *fixed* interval the household picks, not a learned one. That
+was the right first move — it is useful immediately, it needs no history, and
+it built the surface the real prediction will render into. Swapping the
+constant for a rolling median over that baby's own recent feeds is then a
+change to one expression, with the banner, the settings row and the overdue
+styling already in place. Do that before anything sleep-shaped: it is the
+cheapest way to find out whether a predicted number is something you actually
+act on, or just decoration.
+
 When sleep data exists: rolling median wake window from that baby's own last N
 days, bucketed by age. Ship the boring version, measure it against reality for
 two weeks, and only then consider anything smarter.
@@ -978,11 +988,11 @@ timer, and the Live Activity is live on the device that owns the session.
 - **iOS widgets + Live Activities** are Phase 8 — native WidgetKit work, App
   Group for data, `Text(style: .timer)` for ticking, App Intents for buttons.
 
-## Where this stands — 2026-08-29
+## Where this stands — 2026-09-01
 
 **Shipped and in daily use.** Both phones on TestFlight, both parents with
 accounts, 225 events imported, web app at babylog-app.fly.dev as a fallback.
-Phases 1–5 done. 76 Django tests, 6 node suites.
+Phases 1–5 done. 99 Django tests, 7 node suites.
 
 **Two release paths, and they are separate.** `fly deploy` ships the web app and
 the API; `eas update --branch production --environment production` ships the JS
@@ -1061,6 +1071,12 @@ silently accumulating, which is the part that actually mattered.
 - **Phase 8 — Live Activities**, before the home-screen widget. An in-progress
   feed on the lock screen and Dynamic Island is where you would actually look at
   3am. Native work, so it needs a real build rather than an OTA update.
+- **A learned feed interval**, per the note in Phase 6. Small, and the only
+  thing here that gets better the longer the app runs.
+
+**Home and Cal both draw today's timeline.** Harmless duplication left over
+from Cal being newer, and not obviously wrong — Home wants the day at a glance,
+Cal wants navigation. Worth revisiting only if Home starts feeling long.
 
 **Things deliberately not built**, each still the right call: month grid (the
 week strip is enough at ~22 events/day), CRDT sync (last-write-wins is fine for
@@ -1078,6 +1094,18 @@ sailed past the second. ESLint's **`no-undef`** catches both and is now the
 blocking rule in `npm run check`. The lesson is the general one: a hand-rolled
 check that covers the instance you just saw gives false confidence about the
 class.
+
+**A second bug class, and a more expensive one: a rule stated per-symptom.**
+"How long was this feed" was fixed three separate times — first the span check
+that contradicted the side totals, then the dead time after the last stretch,
+then the dead time before the first. Each fix was correct and each left the
+mirror image standing, because each was written against the symptom that got
+reported rather than against the thing that was actually true. Stated as an
+invariant — *a feed spans the stretches the timer ran, and nothing else* — all
+three collapse into one clamp and one helper. The tell was that the second fix
+needed the first fix's code moved to run before it; when the ordering between
+two rules starts mattering, they are usually one rule that has not been named
+yet.
 
 **One piece of debt worth naming:** the import draft lives in client memory, so a
 refresh mid-review loses it and you re-upload. Fine at 224 rows; revisit only if
