@@ -933,10 +933,11 @@ not run on every `manage.py test`.
 - `pip install anthropic`; one endpoint, `POST /api/events/parse/`, returning
   rows in the shape `import_preview` already returns, so the review screen needs
   almost nothing new.
-- `claude-opus-5`, adaptive thinking, structured outputs against the event
-  schema. Cache the system prompt (schema + the household's babies + the unit
-  preference) — it is identical on every call, so it should be a cache read
-  rather than fresh input every time.
+- `claude-opus-5` as the reference implementation, adaptive thinking,
+  structured outputs against the event schema. Cache the system prompt (schema
+  + the household's babies + the unit preference) — it is identical on every
+  call, so it should be a cache read rather than fresh input every time. Other
+  models plug into the same seam; see *Model choice is a config line* below.
 - Timezone goes in the prompt, resolved server-side: "around 3" needs the
   household zone and today's date to become an instant, and the model must
   never be the thing that decides what "today" means.
@@ -944,6 +945,83 @@ not run on every `manage.py test`.
   field is the whole interface.
 - Roughly a few dollars a month at ~15 logs a day. `count_tokens` before
   shipping if that matters; `effort` is the lever if it does.
+
+#### Model choice is a config line, not an architecture
+
+The whole point of the validate-then-review design is that it does not care which
+model produced the rows. So make that explicit and keep a pool.
+
+**The eval is what makes this safe, not the abstraction.** Swapping models
+without the round-trip eval is a vibes decision; with it, it is a measurement.
+Publish a scoreboard per model — round-trip accuracy, schema-violation rate,
+p95 latency, cost per log — and let it decide. That ordering matters: build the
+eval first, then the pool.
+
+**The seam is one function, not a framework.** `parse_events(utterance, ctx)`
+-> `list[dict]`. Two adapters behind it and no more:
+
+- **Claude via the `anthropic` SDK.** Never through an OpenAI-compatible shim —
+  first-party features (structured outputs, adaptive thinking, prompt caching,
+  `count_tokens`) only exist on the real client.
+- **Everything else via one OpenAI-compatible client** pointed at a `base_url`.
+  Together, Fireworks, Groq, OpenRouter, vLLM, SGLang and Ollama all speak
+  `/chat/completions`, so one adapter covers hosted and self-hosted alike.
+
+No LangChain, no model-router library. Two functions and a dict is less code
+than the abstraction that would wrap them, and this seam has exactly one shape.
+
+**Schema enforcement differs by transport — and that is the interesting part:**
+
+| Transport | Mechanism |
+|---|---|
+| Claude | `output_config={"format": {...}}`, or `client.messages.parse()` |
+| OpenAI-compatible (hosted) | `response_format={"type": "json_schema", "strict": true}` — support varies by provider *and* by model |
+| Self-hosted (vLLM / SGLang / TensorRT-LLM) | **XGrammar** grammar-constrained decoding — the default backend in all three. Compiles the schema to a state machine and masks every token that would leave a valid path |
+
+XGrammar's guarantee is structural rather than statistical: valid JSON on the
+first pass, no retry loop. But **constrained decoding guarantees the shape, not
+the meaning** — a model can emit a perfectly schema-valid feed with the sides
+swapped and the time wrong. That is precisely why `validate_payload` runs
+server-side afterwards and why the human still ticks the rows. The weakest
+model in the pool is the reason those checks exist; the strongest model does
+not make them redundant.
+
+**Rules that keep a comparison honest:**
+
+- **One prompt, one schema, one validator for every model.** Only the transport
+  varies. Tune the prompt per model and you are comparing prompts, not models.
+- **Pin exact model ids**, and record which model produced each staged row.
+  A bad batch should be traceable to what generated it.
+- **Judge cost per completed task, not per request.** There is a human in this
+  loop, so the real cost includes the correction at 3am. A model that is a
+  tenth the price and needs two edits per log is not cheaper.
+- **Measure the simple thing before building a router.** One good model at
+  lower `effort` often beats a cheap-model-escalates-to-frontier cascade, and
+  caches are model-scoped — a cascade forfeits cache reuse across its models.
+
+**The open-weight case here is privacy, not price.** This is an infant's health
+record. A locally served model means the utterances never leave hardware you
+own, which is a real reason to keep that path working even if a hosted model
+scores better. Two honest caveats: the Fly machine cannot host a 27B model
+(that needs a GPU box, so "local" means a desktop, not production), and any
+hosted provider needs its data-retention posture checked before a single feed
+goes through it.
+
+**A starting pool, as of September 2026** — a snapshot, deliberately, because
+this list ages in months and the eval is what actually picks:
+
+- `claude-opus-5` as the quality ceiling and the reference the others are
+  scored against.
+- **Qwen3.6-27B** as the local candidate — dense, single consumer GPU, and
+  strong for its size. The privacy path.
+- **DeepSeek V4** as the cost-sensitive hosted pick, **Mistral Small 4**
+  (119B total, ~6B active) as the lean alternative.
+
+Note what this task actually is: short-utterance extraction into a small fixed
+schema. That is not a frontier-reasoning problem, so the gap between a 27B model
+and the ceiling may well be noise here. Do not pick from leaderboards — they
+measure GPQA and coding arenas, neither of which is "did it get the left breast
+and the right time". Run the eval.
 
 **What not to build here:** insight narration ("feeds ran long this week") has
 nothing to validate against and drifts toward medical advice; an LLM
