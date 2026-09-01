@@ -685,6 +685,13 @@ and adds ten minutes to whichever side is still counting. Done server-side, in
 — and in `validate` rather than `update` so it runs before the clamp that
 depends on it, next to the stale-segment drop that must run before them both.
 
+**Which side is next is a corner badge, not a sentence.** The nurse screen
+marks the side that was used last -- from this feed if one is running, else
+from the last saved breast feed -- with a small `last` in the button's top
+corner. It is fetched from a ten-event window rather than the single latest
+feed, so a couple of bottles in between cannot hide it, and it disappears
+while a side is counting, when it would only be restating the obvious.
+
 **A running feed is editable before it is saved.** The nurse screen shows
 "Started 3:14pm — tap to adjust" and opens a date/time field; notes are editable
 too. Both work whether the timer is running or paused, because the side

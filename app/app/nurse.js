@@ -52,6 +52,9 @@ export default function Nurse() {
   const [notes, setNotes] = useState('');
   const [notesDirty, setNotesDirty] = useState(false);
   const [editStart, setEditStart] = useState(false);
+  // Which side the last saved feed finished on, so a fresh timer can say
+  // "start on the other one" -- the question every feed opens with.
+  const [previousSide, setPreviousSide] = useState(null);
 
   const remote =
     events.find((e) => e.type === 'feed' && (!babyId || e.baby === babyId)) || null;
@@ -59,6 +62,21 @@ export default function Nurse() {
   // A timer left running when the app died is picked back up here.
   useEffect(() => {
     local.load().then((saved) => saved && setOfflineState(saved));
+  }, []);
+
+  // A short window rather than just the latest feed: a couple of bottles in
+  // between must not hide which breast was last. Offline it stays blank, which
+  // is honest -- better than naming a side we cannot check.
+  useEffect(() => {
+    let live = true;
+    Events.list({ type: 'feed', limit: 10 })
+      .then(({ data }) => {
+        const rows = data.results || data || [];
+        const last = rows.find((e) => e.payload?.method === 'breast' && e.payload?.last_side);
+        if (live) setPreviousSide(last?.payload?.last_side || null);
+      })
+      .catch(() => {});
+    return () => { live = false; };
   }, []);
 
   // Once we are driving locally we stay there, so a late poll cannot yank the
@@ -298,17 +316,12 @@ export default function Nurse() {
             side={side}
             secs={secs(side)}
             running={view?.running_side === side}
+            wasLast={!view?.running_side && (view?.last_side || previousSide) === side}
             disabled={busy || checking}
             onPress={() => tapSide(side)}
           />
         ))}
       </View>
-
-      {view?.last_side && !view.running_side ? (
-        <Text style={[s.muted, { textAlign: 'center' }]}>
-          Last side: {view.last_side} — start on {view.last_side === 'L' ? 'R' : 'L'} next
-        </Text>
-      ) : null}
 
       {view ? (
         <>
@@ -357,14 +370,14 @@ function sideIntent(state, side, at) {
     : { action: 'start', side, at: at.toISOString() };
 }
 
-function SideButton({ side, secs, running, disabled, onPress }) {
+function SideButton({ side, secs, running, wasLast, disabled, onPress }) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityState={{ selected: running }}
-      accessibilityLabel={`${side === 'L' ? 'Left' : 'Right'} side, ${Math.round(secs / 60)} minutes${running ? ', running' : ''}`}
+      accessibilityLabel={`${side === 'L' ? 'Left' : 'Right'} side, ${Math.round(secs / 60)} minutes${running ? ', running' : ''}${wasLast ? ', used last' : ''}`}
       style={({ pressed }) => ({
         flex: 1,
         backgroundColor: running ? types.nurse.ink : types.nurse.fill,
@@ -384,6 +397,18 @@ function SideButton({ side, secs, running, disabled, onPress }) {
       <Text style={{ fontSize: 12, color: running ? '#FFF' : c.muted, marginTop: 2 }}>
         {running ? '● running' : 'tap to start'}
       </Text>
+      {/* Out of the way in the corner: it answers "which one next?" at a
+          glance and then stops competing with the clock. */}
+      {wasLast ? (
+        <Text
+          style={{
+            position: 'absolute', top: 10, right: 12,
+            fontSize: 11, fontWeight: '700', letterSpacing: 0.3, color: types.nurse.ink,
+          }}
+        >
+          last
+        </Text>
+      ) : null}
     </Pressable>
   );
 }
