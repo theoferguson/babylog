@@ -2,6 +2,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import TabBar from '../src/TabBar';
 import ErrorBoundary from '../src/ErrorBoundary';
 import { SessionProvider, useSession } from '../src/session';
 import '../src/outbox'; // registers the write queue with the API layer
@@ -28,25 +29,33 @@ function Gate() {
     );
   }
   return (
-    <Stack
-      screenOptions={{
-        headerStyle: { backgroundColor: c.bg },
-        headerShadowVisible: false,
-        headerTintColor: c.text,
-        contentStyle: { backgroundColor: c.bg },
-      }}
-    >
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="login" options={{ headerShown: false }} />
-      <Stack.Screen name="join" options={{ headerShown: false }} />
-      <Stack.Screen name="nurse" options={{ title: 'Nursing' }} />
-      <Stack.Screen name="log/bottle" options={{ title: 'Bottle' }} />
-      <Stack.Screen name="log/diaper" options={{ title: 'Diaper' }} />
-      <Stack.Screen name="log/pump" options={{ title: 'Pump' }} />
-      <Stack.Screen name="import" options={{ title: 'Import' }} />
-      <Stack.Screen name="event/[id]" options={{ title: 'Edit event' }} />
-      <Stack.Screen name="settings" options={{ title: 'Settings' }} />
-    </Stack>
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <Stack
+        screenOptions={{
+          headerStyle: { backgroundColor: c.bg },
+          headerShadowVisible: false,
+          headerTintColor: c.text,
+          contentStyle: { backgroundColor: c.bg },
+          // Otherwise iOS labels it with the previous screen's title, which for
+          // the tab screens is the route group name: "(tabs)".
+          headerBackTitle: 'Back',
+        }}
+      >
+        <Stack.Screen name="(tabs)/index" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)/calendar" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)/insights" options={{ headerShown: false }} />
+        <Stack.Screen name="login" options={{ headerShown: false }} />
+        <Stack.Screen name="join" options={{ headerShown: false }} />
+        <Stack.Screen name="nurse" options={{ title: 'Nursing' }} />
+        <Stack.Screen name="log/bottle" options={{ title: 'Bottle' }} />
+        <Stack.Screen name="log/diaper" options={{ title: 'Diaper' }} />
+        <Stack.Screen name="log/pump" options={{ title: 'Pump' }} />
+        <Stack.Screen name="import" options={{ title: 'Import' }} />
+        <Stack.Screen name="event/[id]" options={{ title: 'Edit event' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+      </Stack>
+      <TabBar />
+    </View>
   );
 }
 

@@ -634,7 +634,14 @@ for those the two are the same thing.
 drawn faded across its whole span with the stretches it was actually nursing
 picked out solid, so a 19-minute feed spread over 105 minutes reads as exactly
 that. This needs `payload.segments` — `[{side, from, to}]`, appended whenever a
-side is banked — because per-side totals alone cannot say *when*. **A block is only as tall as the time it represents.** A nursing feed occupies
+side is banked — because per-side totals alone cannot say *when*.
+
+**Stretches are dropped the moment they stop being true.** Editing the side
+totals by hand makes them describe a run that did not happen, so the server
+removes them on any update that changes `right_sec` or `left_sec`. The client
+independently ignores stretches whose lengths do not add up to the side totals,
+which is what stops already-saved bad data drawing a shape that contradicts its
+own duration. **A block is only as tall as the time it represents.** A nursing feed occupies
 its nursing time on the axis, not the span it happened to cover — 19 minutes of
 nursing spread over 105 reads as 19. The exception is a feed that recorded
 segments: there the real span is drawn faded with the nursing stretches picked
@@ -980,6 +987,25 @@ plus a small label, nothing that eats the timeline.
 The month grid is always 42 cells so its height never changes as you page
 through months, and `src/month.test.mjs` covers year rollover, leap years,
 Sunday-aligned rows and week labels that span two months.
+
+The bar is **not** a `Tabs` navigator. Every log form and the event editor are
+pushed screens with headers and back buttons, and a tab navigator above a stack
+hides its bar the moment you push — so the bar disappeared exactly when you
+wanted it. `src/TabBar.js` renders it as a sibling of the root `Stack` instead:
+present on every screen, forms included, hidden only on sign-in and join. Tabs
+`replace` rather than `push`, because a tab is a destination, not history;
+re-tapping the tab you are on still scrolls to the top. The stack also sets
+`headerBackTitle: 'Back'` — iOS otherwise labels the back button with the
+previous screen's title, which for a tab screen was the route group: "(tabs)".
+
+### Next feed
+
+`Household.feed_interval_min` (default 180, bounded 15–1440) drives a banner at
+the top of Home: when the next feed is expected, counted from when the last one
+**started** — nursing or bottle, both are `type=feed` — so a long session does
+not push the next one out by its own length. Overdue turns the card warm.
+Configurable in Settings (1.5h–4h). Nothing is scheduled or notified off it;
+that is Phase 7's job.
 
 ### What is actually left
 

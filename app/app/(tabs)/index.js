@@ -8,7 +8,7 @@ import { cached } from '../../src/cache';
 import OfflineBar from '../../src/OfflineBar';
 import { flush } from '../../src/outbox';
 import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../../src/days';
-import { ago, clock, summarize, timeOfDay } from '../../src/format';
+import { ago, clock, countdown, summarize, timeOfDay } from '../../src/format';
 import { useSession } from '../../src/session';
 import * as localTimer from '../../src/localTimer';
 import { c, space, styleFor, types } from '../../src/theme';
@@ -137,6 +137,8 @@ export default function Home() {
         </View>
       </View>
 
+      <NextFeed last={latest.feed} intervalMin={household?.feed_interval_min} />
+
       {banners.map((b) => (
         <RunningBanner
           key={b.key}
@@ -236,6 +238,41 @@ function DayList({ events, units, router }) {
           </Pressable>
         );
       })}
+    </View>
+  );
+}
+
+// When the next feed is expected. Measured from the last feed's START, so a
+// long nursing session does not push the next one out by its own length.
+function NextFeed({ last, intervalMin }) {
+  // Its own slow tick: the shared one only runs while a timer does, and this
+  // banner has to keep counting down on a screen left open.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+  if (!last || !intervalMin) return null;
+  const due = new Date(new Date(last.started_at).getTime() + intervalMin * 60000);
+  const overdue = due.getTime() <= now;
+  return (
+    <View
+      style={[s.card, {
+        marginTop: space, paddingVertical: 12,
+        backgroundColor: overdue ? c.warnBg : c.surface,
+        borderColor: overdue ? c.accent : c.border,
+      }]}
+    >
+      <View style={[s.row, { justifyContent: 'space-between' }]}>
+        <Text style={s.body}>{overdue ? 'Feed due' : 'Next feed'}</Text>
+        <Text style={[s.body, { fontWeight: '700' }]}>
+          {timeOfDay(due.toISOString())} · {countdown(due.toISOString(), now)}
+        </Text>
+      </View>
+      <Text style={s.muted}>
+        {Math.round(intervalMin / 60 * 10) / 10}h after the last feed started — change it in
+        Settings.
+      </Text>
     </View>
   );
 }

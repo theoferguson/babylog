@@ -1100,3 +1100,52 @@ class NursingDurationTests(APITestCase):
             "ended_at": (self.t0 + timedelta(minutes=95)).isoformat(),
             "payload": {}}, format="json")
         self.assertEqual(r.json()["duration_sec"], 95 * 60)
+
+
+class SegmentsStayHonestTests(APITestCase):
+    """Recorded stretches must never contradict the side totals."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-segments")
+        self.client.force_authenticate(self.user)
+        self.t0 = timezone.now() - timedelta(hours=2)
+        self.ev = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": self.t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json").json()["id"]
+        for body in [
+            {"action": "start", "side": "R", "at": self.t0.isoformat()},
+            {"action": "start", "side": "L",
+             "at": (self.t0 + timedelta(minutes=12)).isoformat()},
+        ]:
+            self.client.post(f"/api/events/{self.ev}/timer/", body, format="json")
+        self.client.post(f"/api/events/{self.ev}/finish/",
+                         {"at": (self.t0 + timedelta(minutes=30)).isoformat()},
+                         format="json")
+
+    def payload(self):
+        return self.client.get(f"/api/events/{self.ev}/").json()["payload"]
+
+    def test_the_timer_records_stretches_that_match_the_totals(self):
+        p = self.payload()
+        self.assertEqual(len(p["segments"]), 2)
+        spanned = sum(
+            (parse_datetime(s["to"]) - parse_datetime(s["from"])).total_seconds()
+            for s in p["segments"])
+        self.assertAlmostEqual(spanned, (p["right_sec"] + p["left_sec"]), delta=2)
+
+    def test_editing_a_side_drops_the_stale_stretches(self):
+        p = self.payload()
+        r = self.client.patch(f"/api/events/{self.ev}/", {
+            "payload": {**p, "right_sec": 5 * 60, "left_sec": 4 * 60}}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        # The stretches described the old run, so they go rather than lie.
+        self.assertNotIn("segments", r.json()["payload"])
+        self.assertEqual(r.json()["duration_sec"], 9 * 60)
+
+    def test_editing_something_else_keeps_the_stretches(self):
+        p = self.payload()
+        r = self.client.patch(f"/api/events/{self.ev}/",
+                              {"notes": "fussy", "payload": p}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(len(r.json()["payload"]["segments"]), 2)
