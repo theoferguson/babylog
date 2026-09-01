@@ -1172,6 +1172,63 @@ class SegmentsStayHonestTests(APITestCase):
         self.assertEqual(parse_datetime(r.json()["ended_at"]), stopped)
         self.assertEqual(r.json()["duration_sec"], 20 * 60)
 
+    def test_a_feed_begins_when_the_timer_did_not_when_the_screen_opened(self):
+        # Open the screen at t0, but tap nothing for seven minutes.
+        t0 = timezone.now() - timedelta(hours=4)
+        ev = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json").json()["id"]
+        first = t0 + timedelta(minutes=7)
+        self.client.post(f"/api/events/{ev}/timer/",
+                         {"action": "start", "side": "L", "at": first.isoformat()},
+                         format="json")
+        r = self.client.post(f"/api/events/{ev}/finish/",
+                             {"at": (first + timedelta(minutes=12)).isoformat()},
+                             format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(parse_datetime(r.json()["started_at"]), first)
+        self.assertEqual(r.json()["duration_sec"], 12 * 60)
+        # Nothing dead at either end: the block is exactly the nursing.
+        self.assertEqual(
+            (parse_datetime(r.json()["ended_at"])
+             - parse_datetime(r.json()["started_at"])).total_seconds(), 12 * 60)
+
+    def test_moving_the_start_moves_the_whole_feed(self):
+        before = self.client.get(f"/api/events/{self.ev}/").json()
+        span = (parse_datetime(before["ended_at"])
+                - parse_datetime(before["started_at"])).total_seconds()
+        moved = parse_datetime(before["started_at"]) - timedelta(minutes=40)
+        r = self.client.patch(f"/api/events/{self.ev}/",
+                              {"started_at": moved.isoformat()}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        after = r.json()
+        # The pin moved; the shape did not.
+        self.assertEqual(parse_datetime(after["started_at"]), moved)
+        self.assertEqual(after["duration_sec"], before["duration_sec"])
+        self.assertEqual(
+            (parse_datetime(after["ended_at"])
+             - parse_datetime(after["started_at"])).total_seconds(), span)
+        # The stretches came with it rather than leaving a gap at the front.
+        self.assertEqual(parse_datetime(after["payload"]["segments"][0]["from"]), moved)
+
+    def test_moving_a_running_feed_s_start_still_lands_in_the_total(self):
+        t0 = timezone.now() - timedelta(minutes=30)
+        ev = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json").json()["id"]
+        self.client.post(f"/api/events/{ev}/timer/",
+                         {"action": "start", "side": "R", "at": t0.isoformat()},
+                         format="json")
+        r = self.client.patch(f"/api/events/{ev}/",
+                              {"started_at": (t0 - timedelta(minutes=10)).isoformat()},
+                              format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        # The running side gained the ten minutes rather than swallowing them.
+        since = parse_datetime(r.json()["payload"]["running_since"])
+        self.assertEqual(since, t0 - timedelta(minutes=10))
+
     def test_a_hand_edited_end_is_pulled_back_to_the_last_stretch(self):
         p = self.payload()
         late = parse_datetime(p["segments"][-1]["to"]) + timedelta(minutes=25)

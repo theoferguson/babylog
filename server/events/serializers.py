@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_datetime
 from rest_framework import serializers
 
 from .models import (Baby, Event, Household, Invite, Membership,
-                     last_segment_end)
+                     segment_span)
 
 # Per-type payload rules. A dict, not a schema framework -- adding a type is a
 # line here plus a form in the app.
@@ -116,6 +116,24 @@ class HouseholdSerializer(serializers.ModelSerializer):
                   "members"]
 
 
+def _shift_times(payload, delta):
+    """Move every recorded instant in a feed's payload by `delta`."""
+    def moved(iso):
+        when = parse_datetime(iso or "")
+        return (when + delta).isoformat() if when else iso
+
+    out = dict(payload)
+    if out.get("segments"):
+        out["segments"] = [
+            {**s, "from": moved(s.get("from")), "to": moved(s.get("to"))}
+            for s in out["segments"]
+        ]
+    since = parse_datetime(out.get("running_since") or "")
+    if since:
+        out["running_since"] = (since + delta).isoformat()
+    return out
+
+
 class EventSerializer(serializers.ModelSerializer):
     """Events, with per-type payload validation."""
 
@@ -132,27 +150,6 @@ class EventSerializer(serializers.ModelSerializer):
                   "notes", "created_by", "updated_at", "deleted_at", "duration_sec",
                   "in_progress"]
         read_only_fields = ["created_by", "updated_at"]
-
-    def update(self, instance, validated_data):
-        """Moving a running feed's start time carries the running side with it.
-
-        The total is time the timer actually ran, so pushing the start back ten
-        minutes has to add ten minutes to whichever side was running -- otherwise
-        the correction shows up in the start time and nowhere in the total.
-        A paused feed has nothing running, so its total is unaffected, which is
-        correct: no side was counting during that stretch.
-        """
-        new_start = validated_data.get("started_at")
-        if new_start and instance.in_progress and new_start != instance.started_at:
-            payload = dict(validated_data.get("payload") or instance.payload or {})
-            since = payload.get("running_since")
-            if since:
-                started = parse_datetime(since)
-                if started is not None:
-                    shifted = started + (new_start - instance.started_at)
-                    payload["running_since"] = shifted.isoformat()
-                    validated_data["payload"] = payload
-        return super().update(instance, validated_data)
 
     def validate(self, attrs):
         # The id is settable only at creation. Letting it through on update makes
@@ -175,6 +172,21 @@ class EventSerializer(serializers.ModelSerializer):
                 payload = {k: v for k, v in payload.items() if k != "segments"}
                 attrs["payload"] = payload
 
+        # Moving the start moves the whole feed. `started_at` pins it to the
+        # calendar, so a correction has to carry the recorded stretches with it
+        # -- leave them where they were and the feed sprouts a gap at the front
+        # that was never anything. A running side is shifted too, and that is
+        # what makes the correction land in the total: pushing the start back
+        # ten minutes leaves the finished stretches the length they were and
+        # adds ten minutes to whichever side is still counting.
+        new_start = attrs.get("started_at")
+        if self.instance is not None and new_start and new_start != self.instance.started_at:
+            delta = new_start - self.instance.started_at
+            payload = _shift_times(payload, delta)
+            attrs["payload"] = payload
+            if self.instance.ended_at and "ended_at" not in attrs:
+                attrs["ended_at"] = self.instance.ended_at + delta
+
         if attrs.get("in_progress") and attrs.get("ended_at"):
             raise serializers.ValidationError("an in-progress event cannot have ended_at")
 
@@ -191,10 +203,13 @@ class EventSerializer(serializers.ModelSerializer):
         # as long as the timer ran, full stop.
 
         # The same rule as `finish`, applied to hand edits and imports: a feed
-        # with recorded stretches ends at the last one. Anything later is the
-        # delay before Save, and it is not part of the feed.
-        if not attrs.get("in_progress"):
-            last = last_segment_end(payload)
+        # spans the stretches the timer ran. Time before the first and after the
+        # last is the screen being open, not nursing, and is not part of it.
+        # Only once it is finished -- a running feed is still being built.
+        if not attrs.get("in_progress", getattr(self.instance, "in_progress", False)):
+            first, last = segment_span(payload)
+            if first and start and start < first:
+                attrs["started_at"] = first
             if last and end and end > last:
                 attrs["ended_at"] = last
 

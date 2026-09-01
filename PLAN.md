@@ -655,14 +655,7 @@ rounds of this:
 - `started_at` — **where the feed sits on the calendar.** That is its whole job.
   It is the one a parent corrects, because "this began at 5:30, not 7:00" is a
   real thing to fix.
-- `ended_at` — **when the nursing stopped**, which is the end of the last
-  recorded stretch, not when Save was pressed. Those are different instants
-  whenever the phone sits face-down for a while before anyone taps Save, and
-  the gap between them is dead time: it must not be drawn on the calendar or
-  counted as duration. `last_segment_end()` supplies it, `finish` uses it, and
-  `EventSerializer.validate` clamps any later value down to it so hand edits
-  and imports obey the same rule. For a feed that never ran a timer there are
-  no stretches to clamp to, so the save instant stands.
+- `ended_at` — **when the nursing stopped.**
 - `right_sec + left_sec` — **how long the feed was**, and the only thing that
   should ever be called its duration.
 
@@ -670,11 +663,27 @@ Sizing blocks by `ended_at - started_at` therefore made correcting a start time
 look like lengthening the feed, which is backwards: moving the pin should move
 the block, not stretch it.
 
-**Correcting the start time therefore has to land in the total.** Moving the
-start back ten minutes shifts the *running segment* back with it, so the side
-that was running gains those ten minutes. A paused feed's total is unchanged,
-which is right: nothing was counting during that stretch. Done server-side, in
-`EventSerializer.update`, because the client must never compute accumulators.
+**A feed spans the stretches the timer ran, and nothing else.** Opening the
+screen and not tapping for seven minutes is not seven minutes of nursing, and
+neither is the phone lying face-down for an hour before someone presses Save.
+Both used to be stored and drawn — `started_at` was when the screen opened and
+`ended_at` was when Save was tapped — so a 47-minute feed could occupy 154
+minutes of calendar, faded at both ends. The invariant now is that
+`started_at` is the first recorded stretch's start and `ended_at` is the last
+one's end. `segment_span()` supplies the pair; `finish` writes it, and
+`EventSerializer.validate` clamps both ends inwards so hand edits and imports
+obey the same rule. A feed that never ran a timer has no stretches to clamp
+to, so the screen's own instants stand.
+
+**Correcting the start time moves the whole feed.** The stretches shift with
+it, which is what keeps the invariant true — leave them behind and the feed
+sprouts a gap at the front that was never anything. A still-running side is
+shifted too, and *that* is what makes the correction land in the total: pushing
+the start back ten minutes leaves the finished stretches the length they were
+and adds ten minutes to whichever side is still counting. Done server-side, in
+`EventSerializer.validate`, because the client must never compute accumulators
+— and in `validate` rather than `update` so it runs before the clamp that
+depends on it, next to the stale-segment drop that must run before them both.
 
 **A running feed is editable before it is saved.** The nurse screen shows
 "Started 3:14pm — tap to adjust" and opens a date/time field; notes are editable

@@ -67,14 +67,15 @@ export const total = (state, now) => secsFor(state, 'R', now) + secsFor(state, '
 // server would have produced, so the outbox can POST it unchanged.
 export function toEvent(state, at, { baby, tz, id }) {
   const done = bank(state, at);
-  const last = (done.segments || []).reduce((a, s) => (s.to > a ? s.to : a), '');
+  // The feed spans the stretches the timer ran -- not the screen being open
+  // before the first tap, nor the delay before Save.
+  const marks = (done.segments || []).flatMap((s) => [s.from, s.to]).sort();
   return {
     id,
     baby,
     type: 'feed',
-    started_at: done.started_at,
-    // The feed ended when the timer last stopped, not when Save was pressed.
-    ended_at: last || at.toISOString(),
+    started_at: marks[0] || done.started_at,
+    ended_at: marks[marks.length - 1] || at.toISOString(),
     tz,
     in_progress: false,
     notes: done.notes || '',
