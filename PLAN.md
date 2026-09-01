@@ -641,7 +641,8 @@ totals by hand makes them describe a run that did not happen, so the server
 removes them on any update that changes `right_sec` or `left_sec`. The client
 independently ignores stretches whose lengths do not add up to the side totals,
 which is what stops already-saved bad data drawing a shape that contradicts its
-own duration. **A block is only as tall as the time it represents.** A nursing feed occupies
+own duration. The offline timer records stretches too, so a feed logged with no
+connection draws identically to one logged with one. **A block is only as tall as the time it represents.** A nursing feed occupies
 its nursing time on the axis, not the span it happened to cover — 19 minutes of
 nursing spread over 105 reads as 19. The exception is a feed that recorded
 segments: there the real span is drawn faded with the nursing stretches picked
@@ -654,8 +655,14 @@ rounds of this:
 - `started_at` — **where the feed sits on the calendar.** That is its whole job.
   It is the one a parent corrects, because "this began at 5:30, not 7:00" is a
   real thing to fix.
-- `ended_at` — bookkeeping. It is whenever Save was pressed, and for a paused
-  feed it says nothing useful on its own.
+- `ended_at` — **when the nursing stopped**, which is the end of the last
+  recorded stretch, not when Save was pressed. Those are different instants
+  whenever the phone sits face-down for a while before anyone taps Save, and
+  the gap between them is dead time: it must not be drawn on the calendar or
+  counted as duration. `last_segment_end()` supplies it, `finish` uses it, and
+  `EventSerializer.validate` clamps any later value down to it so hand edits
+  and imports obey the same rule. For a feed that never ran a timer there are
+  no stretches to clamp to, so the save instant stands.
 - `right_sec + left_sec` — **how long the feed was**, and the only thing that
   should ever be called its duration.
 

@@ -45,15 +45,24 @@ assert.equal(ev.type, 'feed');
 assert.equal(ev.in_progress, false);
 assert.equal(ev.ended_at, at(25).toISOString());
 assert.equal(ev.started_at, T0.toISOString());
-assert.deepEqual(ev.payload, {
+const { segments, ...totals } = ev.payload;
+assert.deepEqual(totals, {
   method: 'breast', right_sec: 17 * 60, left_sec: 8 * 60, last_side: 'R',
 });
+// One stretch per run of a side, in order, adding up to the totals.
+assert.deepEqual(segments.map((g) => g.side), ['R', 'L', 'R']);
+assert.equal(
+  segments.reduce((a, g) => a + (new Date(g.to) - new Date(g.from)) / 1000, 0),
+  25 * 60,
+);
 
 // A single-side feed omits the side that never ran, matching the importer.
 let one = tap(empty(T0), 'L', T0);
 one = tap(one, 'L', at(9));
 const ev2 = toEvent(one, at(9), { baby: 'b', tz: 'UTC', id: 'i' });
-assert.deepEqual(ev2.payload, { method: 'breast', left_sec: 9 * 60, last_side: 'L' });
+const { segments: seg2, ...totals2 } = ev2.payload;
+assert.deepEqual(totals2, { method: 'breast', left_sec: 9 * 60, last_side: 'L' });
+assert.equal(seg2.length, 1);
 
 // Saving while a side is still running banks it rather than losing it.
 let running = tap(empty(T0), 'R', T0);
@@ -61,3 +70,19 @@ const ev3 = toEvent(running, at(10), { baby: 'b', tz: 'UTC', id: 'i' });
 assert.equal(ev3.payload.right_sec, 10 * 60);
 
 console.log('OK  localTimer.js');
+
+// An offline feed ends when the timer stopped, not when Save was pressed.
+{
+  const t = (m) => new Date(Date.UTC(2026, 8, 1, 12, m, 0));
+  let st = empty(t(0));
+  st = tap(st, 'R', t(0));
+  st = tap(st, 'R', t(20));            // stop at +20m
+  const ev = toEvent(st, t(35), { baby: 'b', tz: 'UTC', id: 'x' });
+  assert.equal(ev.ended_at, t(20).toISOString(), 'ends at the last stretch, not the save');
+  assert.equal(ev.payload.right_sec, 20 * 60);
+  assert.equal(ev.payload.segments.length, 1);
+  // A feed the timer never ran for has nothing to clamp to.
+  const bare = toEvent(empty(t(0)), t(5), { baby: 'b', tz: 'UTC', id: 'y' });
+  assert.equal(bare.ended_at, t(5).toISOString());
+}
+console.log('OK  localTimer ends at the last stretch');
