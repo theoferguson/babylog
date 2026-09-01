@@ -1149,3 +1149,45 @@ class SegmentsStayHonestTests(APITestCase):
                               {"notes": "fussy", "payload": p}, format="json")
         self.assertEqual(r.status_code, 200, r.json())
         self.assertEqual(len(r.json()["payload"]["segments"]), 2)
+
+    def test_a_feed_ends_when_the_timer_stopped_not_when_save_was_pressed(self):
+        # setUp stops L at +30m by finishing there, so extend: stop the timer
+        # at +30m, then save ten minutes later.
+        t0 = timezone.now() - timedelta(hours=3)
+        ev = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json").json()["id"]
+        self.client.post(f"/api/events/{ev}/timer/",
+                         {"action": "start", "side": "R", "at": t0.isoformat()},
+                         format="json")
+        stopped = t0 + timedelta(minutes=20)
+        self.client.post(f"/api/events/{ev}/timer/",
+                         {"action": "stop", "at": stopped.isoformat()}, format="json")
+        r = self.client.post(f"/api/events/{ev}/finish/",
+                             {"at": (stopped + timedelta(minutes=10)).isoformat()},
+                             format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        # Ten minutes of "getting round to saving" is not part of the feed.
+        self.assertEqual(parse_datetime(r.json()["ended_at"]), stopped)
+        self.assertEqual(r.json()["duration_sec"], 20 * 60)
+
+    def test_a_hand_edited_end_is_pulled_back_to_the_last_stretch(self):
+        p = self.payload()
+        late = parse_datetime(p["segments"][-1]["to"]) + timedelta(minutes=25)
+        r = self.client.patch(f"/api/events/{self.ev}/",
+                              {"ended_at": late.isoformat()}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(parse_datetime(r.json()["ended_at"]),
+                         parse_datetime(p["segments"][-1]["to"]))
+
+    def test_a_feed_with_no_stretches_still_ends_when_saved(self):
+        t0 = timezone.now() - timedelta(minutes=10)
+        ev = self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "feed",
+            "started_at": t0.isoformat(), "in_progress": True,
+            "payload": {"method": "breast"}}, format="json").json()["id"]
+        at = t0 + timedelta(minutes=5)
+        r = self.client.post(f"/api/events/{ev}/finish/", {"at": at.isoformat()},
+                             format="json")
+        self.assertEqual(parse_datetime(r.json()["ended_at"]), at)

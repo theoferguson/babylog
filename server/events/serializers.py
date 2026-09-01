@@ -8,7 +8,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import serializers
 
-from .models import Baby, Event, Household, Invite, Membership
+from .models import (Baby, Event, Household, Invite, Membership,
+                     last_segment_end)
 
 # Per-type payload rules. A dict, not a schema framework -- adding a type is a
 # line here plus a form in the app.
@@ -141,21 +142,6 @@ class EventSerializer(serializers.ModelSerializer):
         A paused feed has nothing running, so its total is unaffected, which is
         correct: no side was counting during that stretch.
         """
-        # Editing the side totals by hand invalidates the recorded stretches:
-        # they describe a run that no longer matches the numbers. Keeping them
-        # would let the calendar draw a shape that contradicts the duration.
-        incoming = validated_data.get("payload")
-        if incoming is not None:
-            old = instance.payload or {}
-            changed = any(
-                (incoming.get(k) or 0) != (old.get(k) or 0)
-                for k in ("right_sec", "left_sec")
-            )
-            if changed and "segments" in incoming:
-                incoming = dict(incoming)
-                incoming.pop("segments", None)
-                validated_data["payload"] = incoming
-
         new_start = validated_data.get("started_at")
         if new_start and instance.in_progress and new_start != instance.started_at:
             payload = dict(validated_data.get("payload") or instance.payload or {})
@@ -179,6 +165,16 @@ class EventSerializer(serializers.ModelSerializer):
         payload = attrs.get("payload", getattr(self.instance, "payload", {}) or {})
         validate_payload(kind, payload)
 
+        # Editing the side totals by hand invalidates the recorded stretches:
+        # they describe a run that no longer matches the numbers. Keeping them
+        # would let the calendar draw a shape that contradicts the duration.
+        if self.instance is not None and "payload" in attrs and "segments" in payload:
+            old = self.instance.payload or {}
+            if any((payload.get(k) or 0) != (old.get(k) or 0)
+                   for k in ("right_sec", "left_sec")):
+                payload = {k: v for k, v in payload.items() if k != "segments"}
+                attrs["payload"] = payload
+
         if attrs.get("in_progress") and attrs.get("ended_at"):
             raise serializers.ValidationError("an in-progress event cannot have ended_at")
 
@@ -190,9 +186,17 @@ class EventSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("started_at is in the future")
 
         # No span check for nursing. `started_at` only says where the feed sits
-        # on the calendar and `ended_at` is just when Save was pressed, so the
-        # gap between them is not a quantity the side times can contradict. A
-        # feed lasts as long as the timer ran, full stop.
+        # on the calendar, and a feed can be paused, so the gap between start
+        # and end is not a quantity the side times can contradict. A feed lasts
+        # as long as the timer ran, full stop.
+
+        # The same rule as `finish`, applied to hand edits and imports: a feed
+        # with recorded stretches ends at the last one. Anything later is the
+        # delay before Save, and it is not part of the feed.
+        if not attrs.get("in_progress"):
+            last = last_segment_end(payload)
+            if last and end and end > last:
+                attrs["ended_at"] = last
 
         baby = attrs.get("baby", getattr(self.instance, "baby", None))
         if baby is None and kind != Event.PUMP:

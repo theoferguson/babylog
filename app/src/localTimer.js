@@ -32,6 +32,12 @@ export function bank(state, at) {
   // A clock that jumps backwards must never subtract time already banked.
   const elapsed = Math.max(0, Math.round((at.getTime() - new Date(since).getTime()) / 1000));
   next[key] = (next[key] || 0) + elapsed;
+  if (elapsed) {
+    // Remember when, not just how long -- same shape the server records, so an
+    // offline feed and an online one draw identically.
+    next.segments = [...(state.segments || []),
+                     { side, from: since, to: at.toISOString() }];
+  }
   return next;
 }
 
@@ -61,12 +67,14 @@ export const total = (state, now) => secsFor(state, 'R', now) + secsFor(state, '
 // server would have produced, so the outbox can POST it unchanged.
 export function toEvent(state, at, { baby, tz, id }) {
   const done = bank(state, at);
+  const last = (done.segments || []).reduce((a, s) => (s.to > a ? s.to : a), '');
   return {
     id,
     baby,
     type: 'feed',
     started_at: done.started_at,
-    ended_at: at.toISOString(),
+    // The feed ended when the timer last stopped, not when Save was pressed.
+    ended_at: last || at.toISOString(),
     tz,
     in_progress: false,
     notes: done.notes || '',
@@ -75,6 +83,7 @@ export function toEvent(state, at, { baby, tz, id }) {
       ...(done.right_sec ? { right_sec: done.right_sec } : {}),
       ...(done.left_sec ? { left_sec: done.left_sec } : {}),
       ...(done.last_side ? { last_side: done.last_side } : {}),
+      ...(done.segments?.length ? { segments: done.segments } : {}),
     },
   };
 }

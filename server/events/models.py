@@ -5,6 +5,22 @@ from datetime import timedelta
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+
+def last_segment_end(payload):
+    """When the timer last stopped running, from the recorded stretches.
+
+    A feed ends when the nursing ends, not when someone got round to pressing
+    Save. The gap between the two is dead time and must not be drawn on the
+    calendar or counted as duration.
+    """
+    ends = []
+    for seg in (payload or {}).get("segments") or []:
+        when = parse_datetime(seg.get("to") or "")
+        if when is not None:
+            ends.append(when)
+    return max(ends) if ends else None
+
 
 ML_PER_OZ = 29.5735295625
 G_PER_LB = 453.59237

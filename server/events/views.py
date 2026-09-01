@@ -20,7 +20,8 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 
 from .mail import send_invite
-from .models import Baby, Event, Household, Invite, Membership
+from .models import (Baby, Event, Household, Invite, Membership,
+                     last_segment_end)
 from .serializers import (BabySerializer, EventSerializer, HouseholdSerializer,
                           InviteSerializer, RegisterSerializer, validate_payload)
 
@@ -188,7 +189,9 @@ class EventViewSet(viewsets.ModelViewSet):
             if at < ev.started_at:
                 raise ValidationError("cannot finish before it started")
             ev.payload = payload
-            ev.ended_at = at
+            # Not `at`: the feed ended when the timer last stopped. Saving five
+            # minutes later must not tack five minutes onto the event.
+            ev.ended_at = last_segment_end(payload) or at
             ev.in_progress = False
             ev.save(update_fields=["payload", "ended_at", "in_progress", "updated_at"])
         return Response(self.get_serializer(ev).data)
