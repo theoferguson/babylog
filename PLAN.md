@@ -956,12 +956,42 @@ adaptive thinking, and the system prompt (schema + the household's babies +
 unit preference + today's date in the household zone) marked `cache_control`,
 since it is byte-identical on every call.
 
-**Client — one text field**, in the empty state of the screen that already
-exists. `app/import.js` is already two screens in one: `rows === null` shows
-the file picker, otherwise it shows the review list. Add a text input beside
-the picker, POST it, `setRows(body.events)`, and the checkboxes, the red
-warnings, select-all, per-row editing and `import_commit` all work untouched.
-Retitle it *Add events* and point Home's existing "Import" link at it.
+**The button.** A circle in the dead centre of the four log tiles — absolutely
+positioned over the intersection of the 2x2 grid, ~64px, with a few pixels of
+`c.bg` as a ring so it reads as floating above them rather than as a hole cut
+in them. Subordinate on purpose: the four tiles keep their size and their
+colours, and the mic is smaller than any of them. It costs the four inner
+corners of the tiles, which are empty padding, and that is the whole price.
+
+**The review screen — `app/review.js`.** One utterance can produce several
+events ("fed 20 minutes then a wet diaper"), so this is a list of draft cards,
+each with a checkbox, each editable in place, nothing written until a person
+presses save. Same contract as the import review, different surface.
+
+Per card: the type icon and label, the time, and then the same per-type fields
+the event editor already draws. **Extract that block out of `app/event/[id].js`
+into `src/EventFields.js`** — `(type, payload, setP, units, tint)` — and use it
+in both. One component, two callers; the review screen inherits diaper sizes,
+side minutes, bottle volume and pump volumes without a line of new UI, and a
+future field is added once.
+
+Rows that failed `row_errors()` show red and start unchecked, so the failure
+mode is "you notice", not "it saved something wrong".
+
+The CSV importer keeps its own screen. It is a different job — 200 rows from a
+file, not two from a sentence — and merging them would make both worse.
+
+**Correcting by voice, and the guardrail that makes it safe.** The mic is on
+the review screen too: *"no, that was the right side"* re-posts to
+`/api/events/parse/` with the current draft as context and gets a revised draft
+back, validated identically. Spoken *"save it"* resolves to an approve intent.
+
+The rule that keeps that honest: **one turn may revise or approve, never both.**
+An utterance that does both — *"right side, and save it"* — revises and
+re-presents, and waits for a second confirmation. Approve may only ever commit
+the draft **exactly as it is already displayed**, which a human has already
+looked at. The model recognises the command; it never authors the thing being
+committed in the same breath as committing it.
 
 **The four guardrails, and none of them are prompt instructions:**
 
@@ -999,13 +1029,25 @@ with the tiering below, where a number that moves actually decides something.
 **Cost:** roughly a few dollars a month at ~15 logs a day. `count_tokens`
 before shipping if that matters; `effort` is the lever if it does.
 
-**Voice costs nothing extra.** iOS dictation is a keyboard button — the text
-field is the entire interface.
+**Speech-to-text is on-device.** `expo-speech-recognition` uses the OS
+recogniser: free, no second API, and the audio never leaves the phone — which
+matters more here than usual, because the sentences are about an infant's
+health. Web falls back to the Web Speech API, and both fall back to the text
+field, which is also the accessible path and the one that works in a quiet room
+at 3am next to a sleeping baby.
+
+**Sequence it around the build cycle.** The recogniser is a native dependency,
+so the mic needs `eas build` + TestFlight, not an OTA push. Ship the pipeline
+first — endpoint, review screen, and a plain text field — over OTA, use it for
+a few days, and add the button in the next native build. That way the part that
+might be wrong (does the parse actually understand how you talk?) gets tested
+without waiting on a build, and the part that is merely fiddly rides along
+after.
 
 **Explicitly not in part 1:** tiers, local or open-weight models, the router,
-the eval harness, streaming, a bespoke UI. Ship this, use it for a fortnight,
-and let the edits you actually make on the review screen say what tier 1 would
-need to be good at.
+the eval harness, streaming. Ship this, use it for a fortnight, and let the
+edits you actually make on the review screen say what tier 1 would need to be
+good at.
 
 #### Later — tiered routing by complexity and capability
 
