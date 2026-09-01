@@ -7,19 +7,22 @@ from django.db import models
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-def last_segment_end(payload):
-    """When the timer last stopped running, from the recorded stretches.
 
-    A feed ends when the nursing ends, not when someone got round to pressing
-    Save. The gap between the two is dead time and must not be drawn on the
-    calendar or counted as duration.
+def segment_span(payload):
+    """First and last instant the timer actually ran, from the stretches.
+
+    A feed begins when the nursing begins and ends when it ends -- not when
+    someone opened the screen, and not when they got round to pressing Save.
+    Both gaps are dead time: they must not be drawn on the calendar and must
+    not count as duration. `(None, None)` when nothing was ever recorded.
     """
-    ends = []
+    marks = []
     for seg in (payload or {}).get("segments") or []:
-        when = parse_datetime(seg.get("to") or "")
-        if when is not None:
-            ends.append(when)
-    return max(ends) if ends else None
+        for key in ("from", "to"):
+            when = parse_datetime(seg.get(key) or "")
+            if when is not None:
+                marks.append(when)
+    return (min(marks), max(marks)) if marks else (None, None)
 
 
 ML_PER_OZ = 29.5735295625

@@ -86,3 +86,16 @@ console.log('OK  localTimer.js');
   assert.equal(bare.ended_at, t(5).toISOString());
 }
 console.log('OK  localTimer ends at the last stretch');
+
+// ...and it begins when the timer started, not when the screen was opened.
+{
+  const t = (m) => new Date(Date.UTC(2026, 8, 1, 12, m, 0));
+  let st = empty(t(0));         // screen opened at :00
+  st = tap(st, 'L', t(7));      // ...but nothing recorded until :07
+  st = tap(st, 'L', t(19));
+  const ev = toEvent(st, t(24), { baby: 'b', tz: 'UTC', id: 'z' });
+  assert.equal(ev.started_at, t(7).toISOString(), 'no dead time at the front');
+  assert.equal(ev.ended_at, t(19).toISOString(), 'no dead time at the back');
+  assert.equal(ev.payload.left_sec, 12 * 60);
+}
+console.log('OK  localTimer spans only the recorded stretches');
