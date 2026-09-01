@@ -928,25 +928,89 @@ gives an accuracy number that moves when the prompt changes, which is the thing
 most LLM side-projects never build. Keep it as a marked-slow test so it does
 not run on every `manage.py test`.
 
-**Shape of the work:**
+#### Part 1 — one endpoint, one text field  ⬅ **build this**
 
-- `pip install anthropic`; one endpoint, `POST /api/events/parse/`, returning
-  rows in the shape `import_preview` already returns, so the review screen needs
-  almost nothing new.
-- A **tiered ladder**, not one model: regexes, then a small local model, then
-  `claude-opus-5` for what is genuinely hard. See *Tiered routing* below — it is
-  where most of the design lives. Each model tier caches its own system prompt
-  (schema + the household's babies + the unit preference), which is identical on
-  every call and should be a cache read rather than fresh input.
-- Timezone goes in the prompt, resolved server-side: "around 3" needs the
-  household zone and today's date to become an instant, and the model must
-  never be the thing that decides what "today" means.
-- **Voice costs nothing extra.** iOS dictation is a keyboard button — the text
-  field is the whole interface.
-- Roughly a few dollars a month at ~15 logs a day. `count_tokens` before
-  shipping if that matters; `effort` is the lever if it does.
+Deliberately the smallest thing that has all three properties. No tiers, no
+local model, no router, no eval harness. Those are below, and they are later.
 
-#### Tiered routing — complexity and capability pick the model
+**Server — `POST /api/events/parse/`.** Takes `{text}`, returns exactly the
+body `import_preview` already returns, so the client has nothing new to render:
+
+```python
+text = (request.data.get("text") or "").strip()
+if not text:               raise ValidationError("nothing to parse")
+if len(text) > MAX_UTTERANCE:  raise ValidationError("too long")   # a pasted novel is not a feed
+
+hh = current_household(request)
+rows = extract_events(text, tz=hh.timezone, now=timezone.now())    # the only model call
+for r in rows:
+    r["id"] = str(uuid4())        # client-visible, so re-committing is an upsert
+    r["already_imported"] = False
+    r["needs_baby"] = r["type"] != Event.PUMP
+    r["errors"] = row_errors(r)   # the SAME validator the CSV path uses
+```
+
+`extract_events` is one `client.messages.create` with
+`output_config={"format": {...}}` against the event schema, `claude-opus-5`,
+adaptive thinking, and the system prompt (schema + the household's babies +
+unit preference + today's date in the household zone) marked `cache_control`,
+since it is byte-identical on every call.
+
+**Client — one text field**, in the empty state of the screen that already
+exists. `app/import.js` is already two screens in one: `rows === null` shows
+the file picker, otherwise it shows the review list. Add a text input beside
+the picker, POST it, `setRows(body.events)`, and the checkboxes, the red
+warnings, select-all, per-row editing and `import_commit` all work untouched.
+Retitle it *Add events* and point Home's existing "Import" link at it.
+
+**The four guardrails, and none of them are prompt instructions:**
+
+1. **Schema-constrained generation.** A field that is not in the schema cannot
+   be emitted, so there is no free-text JSON to repair.
+2. **`row_errors()` re-validates server-side.** The model's output goes through
+   the same check the CSV importer does. Nothing is trusted because of where it
+   came from.
+3. **`import_commit` stays the only write path.** The parse endpoint writes
+   nothing at all — it returns a draft. Every existing check (payload shape,
+   unknown-key rejection, baby-belongs-to-household, the timestamp invariants)
+   applies at commit whatever produced the row.
+4. **Time is resolved server-side and bounded.** `now` and the household zone
+   go into the prompt; anything the model returns outside a sane window —
+   future, or more than a few days back — becomes a row error rather than a
+   quiet acceptance. A model must never be the thing that decides what "today"
+   means.
+
+Plus the input cap, which is a cost guardrail: an unbounded text field is an
+unbounded bill.
+
+**Human-in-the-loop is the whole shape**, not a confirmation dialog bolted on
+the end. The rows land in a screen built for disbelieving them — every row
+individually editable and deselectable, errors in red, nothing committed until
+a person presses the button.
+
+**The one check to leave behind.** Not a live eval — stub the model and assert
+the guardrail: feed `extract_events` a response with a hallucinated field, a
+swapped side, and a timestamp in 2031, and assert those rows come back with
+`errors` populated and that nothing reached the database. Deterministic, free,
+and it fails if someone later "simplifies" the validation away. A live
+accuracy eval over the 225 imported events is worth building, but it belongs
+with the tiering below, where a number that moves actually decides something.
+
+**Cost:** roughly a few dollars a month at ~15 logs a day. `count_tokens`
+before shipping if that matters; `effort` is the lever if it does.
+
+**Voice costs nothing extra.** iOS dictation is a keyboard button — the text
+field is the entire interface.
+
+**Explicitly not in part 1:** tiers, local or open-weight models, the router,
+the eval harness, streaming, a bespoke UI. Ship this, use it for a fortnight,
+and let the edits you actually make on the review screen say what tier 1 would
+need to be good at.
+
+#### Later — tiered routing by complexity and capability
+
+*Not part 1. Build it when part 1 has been in daily use long enough to say
+what the cheap tiers would have to handle.*
 
 Not a shortlist with one winner: a ladder, where most utterances never reach a
 frontier model and the ones that do have earned it.
@@ -1026,7 +1090,7 @@ without anyone writing an annotation tool.
   transport and the enforcement mechanism differing. If a tier needs its own
   prompt to compete, it is not eligible for that tier.
 
-#### The seam underneath it
+#### Later — the seam underneath the tiers
 
 `parse_events(utterance, ctx)` -> `list[dict]`, with the router above and two
 adapters below it. No LangChain, no router library — the tier ladder is a
