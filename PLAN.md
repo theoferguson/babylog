@@ -891,7 +891,72 @@ server, no FCM, no APNs certificates. Add real push only when you need to notify
 
 ---
 
-### Phase 8 — iOS widgets and Live Activities *(next big one)*
+### Phase 9 — Natural-language logging  ⬅ **next**
+
+Type or dictate *"fed 20 minutes left side around 3, then a wet diaper"* and get
+structured events **staged in the existing import review screen**. Nothing is
+written until you tick the rows.
+
+**Why this one is worth building.** Not because it needs a model — because the
+expensive half is already here. There is a typed schema, a per-type validator
+that rejects unknown keys (`validate_payload`), invariants the server enforces
+whatever the source (`segment_span`, the side-total/segment consistency rule),
+and a parse → review → commit flow with per-row checkboxes and red warnings
+(`import_preview` / `import_commit`, `app/import.js`, `src/ImportRow.js`). Most
+LLM features have nothing to check the model against. This one has all of it
+already, and the model gets to reuse it rather than route around it.
+
+**Three guardrails, none of them prompt-based:**
+
+- **The model proposes, it never writes.** Output goes to the review screen,
+  not the database. `import_commit` stays the only write path, which means
+  every existing check — payload shape, unknown-key rejection, baby-belongs-to
+  -household, the timestamp invariants — applies unchanged.
+- **The schema is enforced by the API, not asked for politely.** Structured
+  outputs (`output_config={"format": {...}}` on `client.messages.create`, or
+  `client.messages.parse()` which validates for you) constrain generation to
+  the event schema. A hallucinated field cannot be emitted, let alone stored.
+- **The parse is validated a second time server-side.** Run the model's rows
+  through `validate_payload` before they are ever rendered, and mark failures
+  red in the review UI rather than dropping them silently. Two independent
+  checks, one of which does not trust the model at all.
+
+**The eval is the part that makes it a real project.** 225 imported events are
+ground truth. Render each one back to natural language, feed it in, assert the
+round-trip — event type, side, volume, and timestamp within a tolerance. That
+gives an accuracy number that moves when the prompt changes, which is the thing
+most LLM side-projects never build. Keep it as a marked-slow test so it does
+not run on every `manage.py test`.
+
+**Shape of the work:**
+
+- `pip install anthropic`; one endpoint, `POST /api/events/parse/`, returning
+  rows in the shape `import_preview` already returns, so the review screen needs
+  almost nothing new.
+- `claude-opus-5`, adaptive thinking, structured outputs against the event
+  schema. Cache the system prompt (schema + the household's babies + the unit
+  preference) — it is identical on every call, so it should be a cache read
+  rather than fresh input every time.
+- Timezone goes in the prompt, resolved server-side: "around 3" needs the
+  household zone and today's date to become an instant, and the model must
+  never be the thing that decides what "today" means.
+- **Voice costs nothing extra.** iOS dictation is a keyboard button — the text
+  field is the whole interface.
+- Roughly a few dollars a month at ~15 logs a day. `count_tokens` before
+  shipping if that matters; `effort` is the lever if it does.
+
+**What not to build here:** insight narration ("feeds ran long this week") has
+nothing to validate against and drifts toward medical advice; an LLM
+data-quality checker is a rules job — a four-hour nursing session is an `if`,
+not a prompt. A second candidate worth keeping in the drawer: **LLM-proposed
+import mappings**, where the model emits a column mapping for an arbitrary
+baby-tracker CSV and the existing deterministic parser executes it, with the
+parse-failure count shown before anything commits. Architecturally the stronger
+story — the model emits config, code does the work — but less useful daily.
+
+---
+
+### Phase 8 — iOS widgets and Live Activities
 
 Two widgets, both about not opening the app:
 
@@ -1067,7 +1132,12 @@ silently accumulating, which is the part that actually mattered.
   sleep is not being logged. Sleep logging exists; nothing else can start until
   it has been running for a few weeks.
 
-**The next real feature, when you want it:**
+**Next up: Phase 9 — natural-language logging.** Useful at 3am with one hand,
+and the honest showcase of what this codebase already has: a typed schema, a
+validator that does not trust its input, and a human-in-the-loop review screen
+that predates the model by four phases.
+
+**After that:**
 - **Phase 8 — Live Activities**, before the home-screen widget. An in-progress
   feed on the lock screen and Dynamic Island is where you would actually look at
   3am. Native work, so it needs a real build rather than an OTA update.
