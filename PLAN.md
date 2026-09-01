@@ -933,11 +933,11 @@ not run on every `manage.py test`.
 - `pip install anthropic`; one endpoint, `POST /api/events/parse/`, returning
   rows in the shape `import_preview` already returns, so the review screen needs
   almost nothing new.
-- `claude-opus-5` as the reference implementation, adaptive thinking,
-  structured outputs against the event schema. Cache the system prompt (schema
-  + the household's babies + the unit preference) — it is identical on every
-  call, so it should be a cache read rather than fresh input every time. Other
-  models plug into the same seam; see *Model choice is a config line* below.
+- A **tiered ladder**, not one model: regexes, then a small local model, then
+  `claude-opus-5` for what is genuinely hard. See *Tiered routing* below — it is
+  where most of the design lives. Each model tier caches its own system prompt
+  (schema + the household's babies + the unit preference), which is identical on
+  every call and should be a cache read rather than fresh input.
 - Timezone goes in the prompt, resolved server-side: "around 3" needs the
   household zone and today's date to become an instant, and the model must
   never be the thing that decides what "today" means.
@@ -946,82 +946,140 @@ not run on every `manage.py test`.
 - Roughly a few dollars a month at ~15 logs a day. `count_tokens` before
   shipping if that matters; `effort` is the lever if it does.
 
-#### Model choice is a config line, not an architecture
+#### Tiered routing — complexity and capability pick the model
 
-The whole point of the validate-then-review design is that it does not care which
-model produced the rows. So make that explicit and keep a pool.
+Not a shortlist with one winner: a ladder, where most utterances never reach a
+frontier model and the ones that do have earned it.
 
-**The eval is what makes this safe, not the abstraction.** Swapping models
-without the round-trip eval is a vibes decision; with it, it is a measurement.
-Publish a scoreboard per model — round-trip accuracy, schema-violation rate,
-p95 latency, cost per log — and let it decide. That ordering matters: build the
-eval first, then the pool.
+The usual objection to a model cascade is that deciding *when* to escalate needs
+a confidence score, and asking a model how confident it is measures nothing.
+That objection does not apply here. **`validate_payload` is a deterministic,
+free escalation trigger** — it answers "is this output actually well-formed"
+without a second opinion, and the review screen is the backstop when it is
+wrong. A cascade with an objective gate at every rung is a different animal
+from one held together by self-reported confidence.
 
-**The seam is one function, not a framework.** `parse_events(utterance, ctx)`
--> `list[dict]`. Two adapters behind it and no more:
+| Tier | Handles | Runs on | Schema enforcement |
+|---|---|---|---|
+| **0 — no model** | The phrasings you actually use: `diaper`, `wet`, `left 20`, `4oz bottle`, `pee + poo` | A dozen regexes, on-device | n/a — it is code, and code cannot hallucinate |
+| **1 — small / local** | One event, plain phrasing, absolute or near-absolute time | Qwen3.6-27B class, vLLM or Ollama | XGrammar grammar-constrained decoding |
+| **2 — frontier** | Multi-event utterances, relative and chained times, corrections, anything tier 1 failed | `claude-opus-5`, adaptive thinking | `output_config={"format": {...}}` |
+
+**Tier 0 earns its place first.** The ladder starts by asking whether this needs
+a model at all, and for the top handful of phrasings it does not: a regex is
+free, instant, offline, and cannot be wrong in an interesting way. Every
+utterance it absorbs is one that never costs a token or a round trip. Build
+this tier before either of the others — it is also the honest baseline the
+model tiers have to beat in the eval.
+
+**Routing is deterministic on the way in, and on the way out.**
+
+*Pre-flight, before any model call* — cheap signals, no inference:
+- token count of the utterance
+- how many distinct event-type keywords appear (two or more → multi-event → tier 2)
+- relative or chained time language: *after*, *before*, *then*, *again*, *earlier*
+- correction language: *actually*, *no*, *instead* — these rewrite a previous row
+  rather than adding one, which tier 1 reliably gets wrong
+
+*Post-flight, deterministic escalation* — the tier below failed, objectively:
+- `validate_payload` rejected the row
+- schema-valid but impossible: end before start, a volume outside plausible range,
+  a timestamp in tomorrow
+- zero rows returned from a non-empty utterance
+- the row count disagrees with the pre-flight keyword count
+
+Never escalate on a model's own assessment of its work.
+
+**Capability gates tier membership, which is the other half of "tiered".** A
+model is only eligible for a tier if the transport can enforce that tier's
+contract. Grammar-constrained decoding available → eligible for tier 1
+unattended. JSON-mode-only or free text → it does not get a tier, because the
+retry loop costs more than the tier above. And availability is part of
+capability: the local box asleep, a provider 429, or no connection at all all
+demote the ladder in the same direction.
+
+**Which is where this meets the offline design already in the app.** With no
+connection, tier 0 still works — it runs on the phone. Anything it cannot parse
+queues the raw text through the existing outbox and is parsed when the
+connection returns, staged for review then. The AI feature inherits the offline
+story rather than needing one.
+
+**What to measure changes: the eval now scores the router, not just models.**
+Per tier — resolution rate (what fraction stopped here), accuracy at that tier,
+and false-stop rate (resolved here, but the human then edited it). The last one
+is the number that matters: a tier that resolves 80% and is quietly wrong on a
+tenth of those is worse than one that escalates more.
+
+**Human edits are the router's training signal, and they are free.** Every
+correction on the review screen is a labelled example that the tier which
+produced it got it wrong. Log the tier and the exact model id on every staged
+row, and the edit rate per tier tells you where the thresholds are mis-set —
+without anyone writing an annotation tool.
+
+**Two honest costs of tiering**, neither fatal:
+- Caches are model-scoped, so there is no cache reuse across tiers. But each
+  tier has its own stable system prompt and its own cache, and tier 2 should be
+  a minority of traffic, so the loss is small — not the argument against
+  cascades it is in a chat product.
+- Two model tiers is two prompt/schema pairs to keep in sync. Mitigate the same
+  way as before: **one schema, one validator, one prompt body**, with only the
+  transport and the enforcement mechanism differing. If a tier needs its own
+  prompt to compete, it is not eligible for that tier.
+
+#### The seam underneath it
+
+`parse_events(utterance, ctx)` -> `list[dict]`, with the router above and two
+adapters below it. No LangChain, no router library — the tier ladder is a
+`for` loop over an ordered list, which is less code than the abstraction that
+would wrap it.
 
 - **Claude via the `anthropic` SDK.** Never through an OpenAI-compatible shim —
-  first-party features (structured outputs, adaptive thinking, prompt caching,
-  `count_tokens`) only exist on the real client.
+  structured outputs, adaptive thinking, prompt caching and `count_tokens` only
+  exist on the real client.
 - **Everything else via one OpenAI-compatible client** pointed at a `base_url`.
   Together, Fireworks, Groq, OpenRouter, vLLM, SGLang and Ollama all speak
   `/chat/completions`, so one adapter covers hosted and self-hosted alike.
 
-No LangChain, no model-router library. Two functions and a dict is less code
-than the abstraction that would wrap them, and this seam has exactly one shape.
+**Constrained decoding guarantees the shape, not the meaning.** XGrammar — the
+default backend in vLLM, SGLang and TensorRT-LLM — compiles the schema to a
+state machine and masks any token that would leave a valid path, so tier 1
+returns parseable JSON first pass with no retry loop. It will still happily
+emit a schema-perfect feed with the sides swapped. That is why `validate_payload`
+runs afterwards, why impossible-but-valid rows escalate rather than commit, and
+why the human still ticks the boxes. The lowest model tier is the reason those
+checks exist; the highest does not make them redundant.
 
-**Schema enforcement differs by transport — and that is the interesting part:**
+**Rules that keep the ladder honest:**
 
-| Transport | Mechanism |
-|---|---|
-| Claude | `output_config={"format": {...}}`, or `client.messages.parse()` |
-| OpenAI-compatible (hosted) | `response_format={"type": "json_schema", "strict": true}` — support varies by provider *and* by model |
-| Self-hosted (vLLM / SGLang / TensorRT-LLM) | **XGrammar** grammar-constrained decoding — the default backend in all three. Compiles the schema to a state machine and masks every token that would leave a valid path |
-
-XGrammar's guarantee is structural rather than statistical: valid JSON on the
-first pass, no retry loop. But **constrained decoding guarantees the shape, not
-the meaning** — a model can emit a perfectly schema-valid feed with the sides
-swapped and the time wrong. That is precisely why `validate_payload` runs
-server-side afterwards and why the human still ticks the rows. The weakest
-model in the pool is the reason those checks exist; the strongest model does
-not make them redundant.
-
-**Rules that keep a comparison honest:**
-
-- **One prompt, one schema, one validator for every model.** Only the transport
-  varies. Tune the prompt per model and you are comparing prompts, not models.
-- **Pin exact model ids**, and record which model produced each staged row.
-  A bad batch should be traceable to what generated it.
+- **Pin exact model ids**, and record the tier and model on every staged row.
 - **Judge cost per completed task, not per request.** There is a human in this
-  loop, so the real cost includes the correction at 3am. A model that is a
-  tenth the price and needs two edits per log is not cheaper.
-- **Measure the simple thing before building a router.** One good model at
-  lower `effort` often beats a cheap-model-escalates-to-frontier cascade, and
-  caches are model-scoped — a cascade forfeits cache reuse across its models.
+  loop, so the real cost includes the correction at 3am. A tier that is a tenth
+  the price and needs two edits per log is not cheaper — it is the expensive one.
+- **Beat tier 0 or do not ship the tier.** A model tier that does not measurably
+  improve on regexes for the traffic it claims is dead weight.
 
 **The open-weight case here is privacy, not price.** This is an infant's health
-record. A locally served model means the utterances never leave hardware you
-own, which is a real reason to keep that path working even if a hosted model
-scores better. Two honest caveats: the Fly machine cannot host a 27B model
-(that needs a GPU box, so "local" means a desktop, not production), and any
-hosted provider needs its data-retention posture checked before a single feed
-goes through it.
+record, and tier 1 is where nearly all of it would be parsed. A locally served
+model means those utterances never leave hardware you own — a real reason to
+keep that rung working even if a hosted model scores a point higher. Two honest
+caveats: the Fly machine cannot host a 27B model (that needs a GPU box, so
+"local" means a desktop, not production), and any hosted provider needs its
+data-retention posture checked before a single feed goes through it.
 
 **A starting pool, as of September 2026** — a snapshot, deliberately, because
 this list ages in months and the eval is what actually picks:
 
-- `claude-opus-5` as the quality ceiling and the reference the others are
-  scored against.
-- **Qwen3.6-27B** as the local candidate — dense, single consumer GPU, and
-  strong for its size. The privacy path.
-- **DeepSeek V4** as the cost-sensitive hosted pick, **Mistral Small 4**
-  (119B total, ~6B active) as the lean alternative.
+- `claude-opus-5` at tier 2, and the reference the lower tiers are scored against.
+- **Qwen3.6-27B** as the tier 1 candidate — dense, single consumer GPU, strong
+  for its size. The privacy rung.
+- **DeepSeek V4** as the cost-sensitive hosted alternative for tier 1,
+  **Mistral Small 4** (119B total, ~6B active) as the lean option.
 
 Note what this task actually is: short-utterance extraction into a small fixed
-schema. That is not a frontier-reasoning problem, so the gap between a 27B model
-and the ceiling may well be noise here. Do not pick from leaderboards — they
-measure GPQA and coding arenas, neither of which is "did it get the left breast
-and the right time". Run the eval.
+schema. That is not a frontier-reasoning problem, so tier 1 may well resolve the
+large majority and tier 2 exist only for the messy 10%. Do not pick from
+leaderboards — they measure GPQA and coding arenas, neither of which is "did it
+get the left breast and the right time". Run the eval.
 
 **What not to build here:** insight narration ("feeds ran long this week") has
 nothing to validate against and drifts toward medical advice; an LLM
