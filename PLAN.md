@@ -909,13 +909,18 @@ already, and the model gets to reuse it rather than route around it.
 **Three guardrails, none of them prompt-based:**
 
 - **The model proposes, it never writes.** Output goes to the review screen,
-  not the database. `import_commit` stays the only write path, which means
-  every existing check — payload shape, unknown-key rejection, baby-belongs-to
-  -household, the timestamp invariants — applies unchanged.
-- **The schema is enforced by the API, not asked for politely.** Structured
-  outputs (`output_config={"format": {...}}` on `client.messages.create`, or
-  `client.messages.parse()` which validates for you) constrain generation to
-  the event schema. A hallucinated field cannot be emitted, let alone stored.
+  not the database. `import_commit` stays the only write path, which means the
+  payload-shape and unknown-key checks apply unchanged. **Note what it does
+  *not* re-check:** `import_commit` builds `Event(...)` directly
+  (`views.py:388`), so `EventSerializer.validate` — and with it `segment_span`
+  and the segment/side-total rules — never runs on an imported row. That is
+  fine for CSV rows, which carry no segments. It is the reason the parse schema
+  must whitelist rather than mirror; see below.
+- **The schema is enforced by the API, not asked for politely.** Strict
+  structured outputs constrain generation at decode time, so a field outside
+  the schema cannot be emitted. But only the schema you can *express* is
+  enforced, and a strict schema is flatter than the real one — which is why the
+  server-side validator below is load-bearing, not decorative.
 - **The parse is validated a second time server-side.** Run the model's rows
   through `validate_payload` before they are ever rendered, and mark failures
   red in the review UI rather than dropping them silently. Two independent
@@ -944,45 +949,73 @@ if len(text) > MAX_UTTERANCE:  raise ValidationError("too long")   # a pasted no
 hh = current_household(request)
 rows = extract_events(text, tz=hh.timezone, now=timezone.now())    # the only model call
 for r in rows:
-    r["id"] = str(uuid4())        # client-visible, so re-committing is an upsert
+    # Content-derived, like the CSV path's uuid5 -- NOT uuid4. A timed-out
+    # request the server actually completed, or the same sentence dictated
+    # twice, must upsert rather than duplicate.
+    r["id"] = str(uuid5(NAMESPACE, f"{hh.id}|{text}|{i}"))
     r["already_imported"] = False
     r["needs_baby"] = r["type"] != Event.PUMP
     r["errors"] = row_errors(r)   # the SAME validator the CSV path uses
 ```
 
 `extract_events` is **one OpenAI call with strict structured outputs** —
-`openai` SDK, schema in `text.format` on the Responses API (or `response_format`
-on Chat Completions), `strict: true`, schema defined as a Pydantic model. Strict
-mode constrains tokens at decode time, so the shape is guaranteed rather than
-requested. Started here because it is the platform already in daily use, and
-because it is the *more reusable* half of the seam: Together, Fireworks, Groq,
-OpenRouter, vLLM, SGLang and Ollama all speak the same API, so the tier-1 rung
-below is already written when it is wanted. Claude is the same function with a
-different adapter — see the tiering section.
+`openai` SDK, **Chat Completions with `response_format` `json_schema` and
+`strict: true`**, schema defined as a Pydantic model. Strict mode constrains
+tokens at decode time, so the shape is guaranteed rather than requested.
 
-The system prompt is schema + the household's babies + unit preference + today's
-date in the household zone. It is byte-identical on every call, which OpenAI
-caches automatically on long-enough prefixes; put anything varying (the
-utterance, the current draft) last so the prefix stays stable.
+**Chat Completions specifically, not the Responses API** — and the reason is
+the whole justification for starting here. Together, Fireworks, Groq,
+OpenRouter, vLLM, SGLang and Ollama speak *Chat Completions*; `text.format` on
+the Responses API is OpenAI-only. Building on the portable surface means the
+tier-1 rung below is already written when it is wanted. Pick the proprietary
+one and the seam being bought is not the one the plan is paying for. Claude is
+the same function with a different adapter — see the tiering section.
+
+The system prompt is the schema + unit preference + today's date in the
+household zone. Put anything varying last so the prefix stays stable — that
+costs nothing and is good practice regardless. Do **not** count on automatic
+prefix caching: it needs a long prefix (~1024 tokens, more than this is likely
+to be) and a warm recent window, and this prompt contains the current date, so
+it changes daily anyway. If caching matters later, measure it rather than
+assume it.
+
+**No babies in the prompt for part 1.** Per-row attribution is not expressible
+on the write path: `import_commit` takes one `baby` for the whole request
+(`views.py:377`) and `app/import.js:75` passes the session's `babyId`. "Ada
+took 4oz, Ben had a wet one" would silently put both on whoever is selected.
+One baby today, so this costs nothing; adding it means a per-row baby on the
+review screen *and* in commit, and that is a later change.
 
 **Two strict-mode constraints that shape the schema, and they matter here:**
 
 - **Optional means nullable, not absent.** Under `strict: true` every key must
-  appear in `required`; an optional field is expressed as a union with `null`.
-  babylog's payloads are mostly optional — `ended_at`, `pee`, `poo`,
-  `volume_ml`, `left_sec`, `right_ml` — so the model will emit *every* key on
-  *every* row, with nulls for the ones that do not apply. **Strip nulls before
-  `validate_payload`**, which rejects keys that do not belong to the type.
-- **Strict schemas want to be flat.** Expressing "a feed has these fields, a
-  diaper has those" as a root-level union fights the format. The pragmatic shape
-  is one flat schema — `type` as an enum, `payload` as a single object holding
-  every possible field, all nullable — and then `validate_payload` enforces the
-  real per-type shape server-side.
+  appear in `required`; an optional field is a union with `null`. So the model
+  emits *every* payload key on *every* row, nulled where it does not apply, and
+  those must be stripped before `validate_payload`. The reason is narrower than
+  it looks: `validate_payload` already skips a key that is `None`
+  (`serializers.py:65`), so a null on a type's *own* optional field is
+  harmless. What breaks is the *cross-type* keys the flat schema forces —
+  `pee: null` on a feed is an unknown key for `feed` and fails at
+  `serializers.py:59`.
+- **Strict schemas want to be flat, and the flat schema must be a whitelist.**
+  A root-level union of per-type payloads fights the format, so it becomes one
+  object with `type` as an enum and every field nullable. **List only the
+  user-settable fields.** `PAYLOAD_FIELDS[FEED]` also contains `running_side`,
+  `running_since` and `segments` — server-owned timer state, marked as such in
+  the code — and `validate_payload` accepts them as valid feed keys. Mirror the
+  full list into the schema and a model can author stretches nobody timed;
+  because `import_commit` bypasses `EventSerializer.validate`, they would
+  commit unclamped and the calendar would draw them. `segments` is only checked
+  as `(list, False)`, so a malformed element is not caught at all and can 500 a
+  later `PATCH` through `_shift_times`. The parse schema whitelists; it does
+  not mirror.
 
 Which sharpens the guardrail story rather than weakening it: **strict mode can
 only guarantee the schema you can express, and the schema you can express is
-looser than the one you actually have.** The server-side validator is what
-closes that gap, and it is now load-bearing rather than belt-and-braces.
+looser than the one you actually have.** The server-side validator closes part
+of that gap; the whitelist closes the part the validator cannot see, because a
+server-owned field is indistinguishable from a legitimate one once it is in the
+payload.
 
 **The key is `OPENAI_API_KEY`, set as a Fly secret**, read from the environment
 by a bare `OpenAI()`. Server-side only — never `EXPO_PUBLIC_*`, which is inlined
@@ -990,6 +1023,24 @@ into the JS bundle and ships to every phone. The phone posts to
 `/api/events/parse/` with the token auth it already has; the server holds the
 key. That is also what makes "the model cannot write" true, since the only route
 to a model is through the validated endpoint.
+
+**Two operational limits this endpoint needs that no other one does**, because
+it is the first route that spends money per request:
+
+- **A per-user throttle.** `DEFAULT_THROTTLE_RATES` currently has one scope,
+  `register: 20/hour`, and there is no default throttle class
+  (`settings.py:146`). Registration is open, so without a rate cap the ceiling
+  on a stranger's spending is the OpenAI account's. One `throttle_classes` on
+  the view and one line in the existing rates dict. The utterance-length cap
+  bounds a single call; this bounds the loop.
+- **Timeouts on both sides.** `api.js:44` hard-codes `timeoutMs = 15000` for
+  every request, and an abort surfaces as `ApiError(0, 'Request timed out')`,
+  which the app renders as being offline. A multi-event utterance can take
+  longer than that: the phone would give up, show a connection error, and the
+  server would finish and bill the call anyway. Pass an explicit longer timeout
+  for this one call, and give the `OpenAI()` client a bounded one so a hung
+  upstream cannot pin a worker — there are only 2x4 of them on a 512MB machine,
+  and `useActiveEvents` is polling every 3s during a feed.
 
 **The button.** A circle in the dead centre of the four log tiles — absolutely
 positioned over the intersection of the 2x2 grid, ~64px, with a few pixels of
