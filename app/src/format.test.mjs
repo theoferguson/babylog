@@ -1,6 +1,6 @@
 // Plain node, no framework: node src/format.test.mjs
 import assert from 'node:assert/strict';
-import { ago, clock, countdown, summarize, toMl, volume } from './format.js';
+import { ago, clock, countdown, lastNursedSide, summarize, toMl, volume } from './format.js';
 
 const T = (s) => new Date(Date.UTC(2026, 7, 28, 12, 0, 0)).getTime() + s * 1000;
 const now = T(0);
@@ -51,3 +51,17 @@ console.log('OK  format.js');
   assert.equal(countdown('2026-08-31T10:00:00Z', t0), '2h 0m ago');
 }
 console.log('format: ok');
+
+// lastNursedSide -- the badge on the nurse screen. Pinned because getting the
+// response shape wrong here fails silently: the fetch is in a .catch(() => {}).
+{
+  const feed = (method, last_side) => ({ payload: { method, ...(last_side ? { last_side } : {}) } });
+  const rows = [feed('bottle'), feed('breast', 'R'), feed('breast', 'L')];
+  assert.equal(lastNursedSide({ results: rows }), 'R', 'paginated response');
+  assert.equal(lastNursedSide(rows), 'R', 'bare array');
+  assert.equal(lastNursedSide({ results: [] }), null);
+  assert.equal(lastNursedSide(undefined), null);
+  // A feed with no recorded side is skipped, not treated as an answer.
+  assert.equal(lastNursedSide([feed('breast'), feed('breast', 'L')]), 'L');
+}
+console.log('OK  lastNursedSide');

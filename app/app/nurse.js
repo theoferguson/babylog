@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { Events, deviceTz } from '../src/api';
 import DateTimeField from '../src/DateTimeField';
-import { clock } from '../src/format';
+import { clock, lastNursedSide } from '../src/format';
 import * as local from '../src/localTimer';
 import OfflineBar from '../src/OfflineBar';
 import { enqueue, isOffline, newId } from '../src/outbox';
@@ -70,11 +70,11 @@ export default function Nurse() {
   useEffect(() => {
     let live = true;
     Events.list({ type: 'feed', limit: 10 })
-      .then(({ data }) => {
-        const rows = data.results || data || [];
-        const last = rows.find((e) => e.payload?.method === 'breast' && e.payload?.last_side);
-        if (live) setPreviousSide(last?.payload?.last_side || null);
-      })
+      .then((body) => live && setPreviousSide(lastNursedSide(body)))
+      // Offline is the expected failure and the badge is a nicety, so it stays
+      // quiet -- which is exactly why the shape handling above lives in a
+      // tested function. A catch this broad hides a typo as happily as a
+      // dropped connection, and it did.
       .catch(() => {});
     return () => { live = false; };
   }, []);

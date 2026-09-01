@@ -20,6 +20,16 @@ export function countdown(iso, now = Date.now()) {
   return secs > 0 ? `in ${span}` : `${span} ago`;
 }
 
+// Which side was nursed most recently, so the timer can suggest the other one.
+// Takes a list response -- paginated `{results}` or a bare array -- newest
+// first. Bottles in between are skipped rather than ending the search: they
+// are feeds, but they are not a side.
+export function lastNursedSide(body) {
+  const rows = body?.results || body || [];
+  const last = rows.find((e) => e.payload?.method === 'breast' && e.payload?.last_side);
+  return last?.payload?.last_side || null;
+}
+
 export function clock(secs) {
   const s = Math.max(0, Math.floor(secs));
   const m = Math.floor(s / 60);
