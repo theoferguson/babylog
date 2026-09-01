@@ -950,11 +950,46 @@ for r in rows:
     r["errors"] = row_errors(r)   # the SAME validator the CSV path uses
 ```
 
-`extract_events` is one `client.messages.create` with
-`output_config={"format": {...}}` against the event schema, `claude-opus-5`,
-adaptive thinking, and the system prompt (schema + the household's babies +
-unit preference + today's date in the household zone) marked `cache_control`,
-since it is byte-identical on every call.
+`extract_events` is **one OpenAI call with strict structured outputs** —
+`openai` SDK, schema in `text.format` on the Responses API (or `response_format`
+on Chat Completions), `strict: true`, schema defined as a Pydantic model. Strict
+mode constrains tokens at decode time, so the shape is guaranteed rather than
+requested. Started here because it is the platform already in daily use, and
+because it is the *more reusable* half of the seam: Together, Fireworks, Groq,
+OpenRouter, vLLM, SGLang and Ollama all speak the same API, so the tier-1 rung
+below is already written when it is wanted. Claude is the same function with a
+different adapter — see the tiering section.
+
+The system prompt is schema + the household's babies + unit preference + today's
+date in the household zone. It is byte-identical on every call, which OpenAI
+caches automatically on long-enough prefixes; put anything varying (the
+utterance, the current draft) last so the prefix stays stable.
+
+**Two strict-mode constraints that shape the schema, and they matter here:**
+
+- **Optional means nullable, not absent.** Under `strict: true` every key must
+  appear in `required`; an optional field is expressed as a union with `null`.
+  babylog's payloads are mostly optional — `ended_at`, `pee`, `poo`,
+  `volume_ml`, `left_sec`, `right_ml` — so the model will emit *every* key on
+  *every* row, with nulls for the ones that do not apply. **Strip nulls before
+  `validate_payload`**, which rejects keys that do not belong to the type.
+- **Strict schemas want to be flat.** Expressing "a feed has these fields, a
+  diaper has those" as a root-level union fights the format. The pragmatic shape
+  is one flat schema — `type` as an enum, `payload` as a single object holding
+  every possible field, all nullable — and then `validate_payload` enforces the
+  real per-type shape server-side.
+
+Which sharpens the guardrail story rather than weakening it: **strict mode can
+only guarantee the schema you can express, and the schema you can express is
+looser than the one you actually have.** The server-side validator is what
+closes that gap, and it is now load-bearing rather than belt-and-braces.
+
+**The key is `OPENAI_API_KEY`, set as a Fly secret**, read from the environment
+by a bare `OpenAI()`. Server-side only — never `EXPO_PUBLIC_*`, which is inlined
+into the JS bundle and ships to every phone. The phone posts to
+`/api/events/parse/` with the token auth it already has; the server holds the
+key. That is also what makes "the model cannot write" true, since the only route
+to a model is through the validated endpoint.
 
 **The button.** A circle in the dead centre of the four log tiles — absolutely
 positioned over the intersection of the 2x2 grid, ~64px, with a few pixels of
@@ -1090,7 +1125,7 @@ from one held together by self-reported confidence.
 |---|---|---|---|
 | **0 — no model** | The phrasings you actually use: `diaper`, `wet`, `left 20`, `4oz bottle`, `pee + poo` | A dozen regexes, on-device | n/a — it is code, and code cannot hallucinate |
 | **1 — small / local** | One event, plain phrasing, absolute or near-absolute time | Qwen3.6-27B class, vLLM or Ollama | XGrammar grammar-constrained decoding |
-| **2 — frontier** | Multi-event utterances, relative and chained times, corrections, anything tier 1 failed | `claude-opus-5`, adaptive thinking | `output_config={"format": {...}}` |
+| **2 — frontier** | Multi-event utterances, relative and chained times, corrections, anything tier 1 failed | Whatever part 1 settled on, or `claude-opus-5` | Strict structured outputs, either way |
 
 **Tier 0 earns its place first.** The ladder starts by asking whether this needs
 a model at all, and for the top handful of phrasings it does not: a regex is
@@ -1196,7 +1231,8 @@ data-retention posture checked before a single feed goes through it.
 **A starting pool, as of September 2026** — a snapshot, deliberately, because
 this list ages in months and the eval is what actually picks:
 
-- `claude-opus-5` at tier 2, and the reference the lower tiers are scored against.
+- Part 1's own model at tier 2, with `claude-opus-5` the obvious thing to
+  measure it against — the seam already accepts both.
 - **Qwen3.6-27B** as the tier 1 candidate — dense, single consumer GPU, strong
   for its size. The privacy rung.
 - **DeepSeek V4** as the cost-sensitive hosted alternative for tier 1,
