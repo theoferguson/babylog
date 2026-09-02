@@ -3,7 +3,10 @@ import { Choice } from './InstantForm';
 import { toMl, volume } from './format';
 import { s } from './ui';
 
-const SIZES = ['small', 'medium', 'large'].map((v) => ({ value: v, label: v }));
+const opts = (vs) => vs.map((v) => ({ value: v, label: v }));
+const SIZES = opts(['small', 'medium', 'large']);
+export const POO_COLOURS = opts(['yellow', 'brown', 'green', 'black']);
+export const POO_TEXTURES = opts(['runny', 'loose', 'seedy', 'firm']);
 
 // The per-type payload fields, in one place.
 //
@@ -21,7 +24,17 @@ export default function EventFields({ type, payload, setP, units, disabled }) {
           <Choice label="Pee" options={SIZES} value={payload.pee ?? null}
                   onChange={(v) => setP({ pee: v ?? undefined })} />
           <Choice label="Poo" options={SIZES} value={payload.poo ?? null}
-                  onChange={(v) => setP({ poo: v ?? undefined })} />
+                  onChange={(v) => setP(v
+                    ? { poo: v }
+                    : { poo: undefined, color: undefined, consistency: undefined })} />
+          {payload.poo ? (
+            <>
+              <Choice label="Colour" options={POO_COLOURS} value={payload.color ?? null}
+                      onChange={(v) => setP({ color: v ?? undefined })} />
+              <Choice label="Consistency" options={POO_TEXTURES} value={payload.consistency ?? null}
+                      onChange={(v) => setP({ consistency: v ?? undefined })} />
+            </>
+          ) : null}
         </>
       ) : null}
 
