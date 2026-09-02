@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { Animated, Modal, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { c, radius, space } from './theme';
 import { Button, s } from './ui';
 
@@ -24,11 +24,18 @@ export const canListen =
 // a hook -- it cannot be called from inside an effect, and it cannot be called
 // conditionally. Mounting this only while the sheet is open is how the
 // subscription gets scoped without breaking the rules of hooks.
-function Listening({ onTranscript, onEnd, onStatus }) {
+function Listening({ onTranscript, onEnd, onStatus, level }) {
   const mod = Speech.ExpoSpeechRecognitionModule;
   const useSpeechRecognitionEvent = Speech.useSpeechRecognitionEvent;
 
   useSpeechRecognitionEvent('start', () => onStatus({ note: 'Listening…' }));
+  // The recogniser reports input volume roughly -2 (silence) to 10 (loud).
+  // Animating from that rather than a timer is the difference between showing
+  // that we started and showing that we can hear you.
+  useSpeechRecognitionEvent('volumechange', (e) => {
+    const v = Math.max(0, Math.min(1, ((e.value ?? 0) + 2) / 8));
+    Animated.timing(level, { toValue: v, duration: 90, useNativeDriver: true }).start();
+  });
   useSpeechRecognitionEvent('result', (e) => {
     onTranscript(e.results?.[0]?.transcript ?? '');
   });
@@ -105,8 +112,12 @@ export default function MicButton({ inline, label, busy, onText }) {
   // recogniser failure to the parent put the message underneath the modal,
   // where a real error and plain silence look exactly the same.
   const [status, setStatus] = useState(null);
+  // An Animated.Value rather than state: volume events arrive many times a
+  // second and re-rendering the sheet on each one would be absurd.
+  const [level] = useState(() => new Animated.Value(0));
 
   const close = () => {
+    level.setValue(0);
     setOpen(false);
     setHeard('');
     setStatus(null);
@@ -161,15 +172,19 @@ export default function MicButton({ inline, label, busy, onText }) {
                 onTranscript={setHeard}
                 onEnd={() => setListening(false)}
                 onStatus={setStatus}
+                level={level}
               />
             ) : null}
 
-            <Text style={s.h2}>
-              {status?.note && listening ? status.note
-                : listening ? 'Starting…'
-                : canListen ? 'Check it, then Done'
-                : 'Type what happened'}
-            </Text>
+            <View style={[s.row, { gap: 10 }]}>
+              {listening ? <Level value={level} /> : null}
+              <Text style={[s.h2, { flex: 1 }]}>
+                {status?.note && listening ? status.note
+                  : listening ? 'Starting…'
+                  : canListen ? 'Check it, then Done'
+                  : 'Type what happened'}
+              </Text>
+            </View>
             {status?.error ? (
               <View style={s.error}>
                 <Text style={s.errorText}>{status.error}</Text>
@@ -196,5 +211,39 @@ export default function MicButton({ inline, label, busy, onText }) {
         </View>
       </Modal>
     </>
+  );
+}
+
+
+// Three bars that rise with what the microphone is actually picking up. Silence
+// leaves them at rest, which is the honest answer to "is it hearing me?" -- a
+// decorative pulse would say yes either way.
+function Level({ value }) {
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 22 }}>
+      {[0.7, 1, 0.8].map((weight, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            width: 4,
+            height: 22,
+            borderRadius: 2,
+            backgroundColor: c.accent,
+            // scaleY is about the centre by default, which would grow each bar
+            // in both directions like a spike rather than a level.
+            transformOrigin: 'bottom',
+            transform: [
+              {
+                scaleY: value.interpolate({
+                  inputRange: [0, 1],
+                  // Never fully flat: a resting bar still reads as "on".
+                  outputRange: [0.18, 0.18 + 0.82 * weight],
+                }),
+              },
+            ],
+          }}
+        />
+      ))}
+    </View>
   );
 }
