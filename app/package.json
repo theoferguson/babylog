@@ -33,7 +33,8 @@
     "android": "expo start --android",
     "web": "expo start --web",
     "check": "expo lint --max-warnings 99 && node src/days.test.mjs && node src/format.test.mjs && node src/stats.test.mjs && node src/outbox.test.mjs && node src/localTimer.test.mjs && node src/timelineLayout.test.mjs && node src/month.test.mjs",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "deploy": "npx eas-cli@latest update --branch production --environment production"
   },
   "private": true,
   "devDependencies": {
