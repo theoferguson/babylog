@@ -24,42 +24,64 @@ export const canListen =
 // a hook -- it cannot be called from inside an effect, and it cannot be called
 // conditionally. Mounting this only while the sheet is open is how the
 // subscription gets scoped without breaking the rules of hooks.
-function Listening({ onTranscript, onEnd, onError }) {
+function Listening({ onTranscript, onEnd, onStatus }) {
   const mod = Speech.ExpoSpeechRecognitionModule;
   const useSpeechRecognitionEvent = Speech.useSpeechRecognitionEvent;
 
+  useSpeechRecognitionEvent('start', () => onStatus({ note: 'Listening…' }));
   useSpeechRecognitionEvent('result', (e) => {
     onTranscript(e.results?.[0]?.transcript ?? '');
   });
   useSpeechRecognitionEvent('end', () => onEnd());
   useSpeechRecognitionEvent('error', (e) => {
     onEnd();
-    // A silence is not a fault worth shouting about.
-    if (e.error && e.error !== 'no-speech') onError(new Error(e.message || e.error));
+    // A silence is not a fault worth reporting.
+    if (e.error && e.error !== 'no-speech') {
+      onStatus({ error: e.message || e.error });
+    }
   });
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const { granted } = await mod.requestPermissionsAsync();
-        if (!granted) {
-          onError(new Error('Microphone access is off for babylog.'));
+        if (!mod.isRecognitionAvailable()) {
+          onStatus({ error: 'Speech recognition is not available on this device.' });
           onEnd();
           return;
         }
-        // On-device: the audio never leaves the phone, which matters when the
-        // sentences are about an infant's health.
-        if (alive) {
-          mod.start({
-            lang: 'en-US',
-            interimResults: true,
-            continuous: false,
-            requiresOnDeviceRecognition: true,
-          });
+        // Requested separately so a refusal names the one that is missing --
+        // iOS asks twice and it is easy to grant one and dismiss the other.
+        const speech = await mod.requestSpeechRecognizerPermissionsAsync();
+        if (!speech.granted) {
+          onStatus({ error: 'Speech recognition is off for babylog in Settings.' });
+          onEnd();
+          return;
         }
+        const microphone = await mod.requestMicrophonePermissionsAsync();
+        if (!microphone.granted) {
+          onStatus({ error: 'Microphone access is off for babylog in Settings.' });
+          onEnd();
+          return;
+        }
+        if (!alive) return;
+
+        // On-device keeps the audio on the phone, which is the point when the
+        // sentences are about an infant's health -- but it needs the locale
+        // downloaded, and asking for it when it is unavailable just fails.
+        // Say which one is happening rather than quietly doing the other.
+        const onDevice = mod.supportsOnDeviceRecognition();
+        onStatus({
+          note: onDevice ? 'Listening — on this phone.' : 'Listening — via Apple.',
+        });
+        mod.start({
+          lang: 'en-US',
+          interimResults: true,
+          continuous: false,
+          requiresOnDeviceRecognition: onDevice,
+        });
       } catch (e) {
-        onError(e);
+        onStatus({ error: String(e?.message || e) });
         onEnd();
       }
     })();
@@ -75,14 +97,19 @@ function Listening({ onTranscript, onEnd, onError }) {
 }
 
 // Voice in, text out. Nothing here knows what the text means.
-export default function MicButton({ inline, label, busy, onText, onError }) {
+export default function MicButton({ inline, label, busy, onText }) {
   const [open, setOpen] = useState(false);
   const [heard, setHeard] = useState('');
   const [listening, setListening] = useState(canListen);
+  // Status belongs to the sheet, not the screen behind it. Reporting a
+  // recogniser failure to the parent put the message underneath the modal,
+  // where a real error and plain silence look exactly the same.
+  const [status, setStatus] = useState(null);
 
   const close = () => {
     setOpen(false);
     setHeard('');
+    setStatus(null);
     setListening(canListen);
   };
 
@@ -133,13 +160,24 @@ export default function MicButton({ inline, label, busy, onText, onError }) {
               <Listening
                 onTranscript={setHeard}
                 onEnd={() => setListening(false)}
-                onError={(e) => { setListening(false); onError?.(e); }}
+                onStatus={setStatus}
               />
             ) : null}
 
             <Text style={s.h2}>
-              {listening ? 'Listening…' : canListen ? 'Check it, then Done' : 'Type what happened'}
+              {status?.note && listening ? status.note
+                : listening ? 'Starting…'
+                : canListen ? 'Check it, then Done'
+                : 'Type what happened'}
             </Text>
+            {status?.error ? (
+              <View style={s.error}>
+                <Text style={s.errorText}>{status.error}</Text>
+                <Text style={[s.errorText, { marginTop: 4 }]}>
+                  You can still type it below.
+                </Text>
+              </View>
+            ) : null}
             <TextInput
               style={[s.input, { minHeight: 80, textAlignVertical: 'top' }]}
               multiline

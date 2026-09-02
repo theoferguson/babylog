@@ -181,7 +181,7 @@ export default function Home() {
         <LogButton t={types.bottle} onPress={() => router.push('/log/bottle')} />
         <LogButton t={types.diaper} onPress={() => router.push('/log/diaper')} />
         <LogButton t={types.pump} onPress={() => router.push('/log/pump')} />
-        <MicButton busy={busy} onText={speak} onError={setError} />
+        <MicButton busy={busy} onText={speak} />
       </View>
 
       <OfflineBar stale={stale} onFlushed={load} />

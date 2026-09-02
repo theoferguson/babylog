@@ -123,13 +123,7 @@ export default function Review() {
 
       {rows.length ? (
         <>
-          <MicButton
-            inline
-            label="Change something"
-            busy={busy}
-            onText={revise}
-            onError={setError}
-          />
+          <MicButton inline label="Change something" busy={busy} onText={revise} />
           <Button
             title={busy ? 'Saving…' : `Save ${selected.length} event${selected.length === 1 ? '' : 's'}`}
             onPress={save}
