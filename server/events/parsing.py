@@ -145,8 +145,13 @@ def _completion(messages):
     return json.loads(res.choices[0].message.content)
 
 
-def extract_events(text, *, tz, now, units="metric", draft=None):
-    """Draft rows for one utterance. Never raises on model output."""
+def extract_events(text, *, tz, now, scope, units="metric", draft=None):
+    """Draft rows for one utterance. Never raises on model output.
+
+    `scope` is the household. It belongs in the id because these are derived
+    from content: without it, two households both saying "wet diaper" mint the
+    same uuid5, and a commit from one would land on the other's row.
+    """
     body = _completion(_prompt(text, tz, now, units, draft))
     rows = (body or {}).get("events") or []
     out = []
@@ -154,7 +159,7 @@ def extract_events(text, *, tz, now, units="metric", draft=None):
         row = _clean(raw, tz=tz, now=now)
         if row is None:
             continue
-        row["id"] = str(uuid.uuid5(NAMESPACE, f"{text}|{i}"))
+        row["id"] = str(uuid.uuid5(NAMESPACE, f"{scope}|{text}|{i}"))
         out.append(row)
     return out
 
