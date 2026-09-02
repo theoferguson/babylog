@@ -1,4 +1,5 @@
 import tempfile
+import uuid
 from datetime import timedelta
 from unittest import mock
 from pathlib import Path
@@ -1392,3 +1393,73 @@ class SpokenFieldsAllowlistTests(APITestCase):
             schema()["properties"]["events"]["items"]["properties"]["payload"]["required"])
         allowed = {f for fields in SPOKEN_FIELDS.values() for f in fields}
         self.assertEqual(offered, allowed)
+
+
+class CrossHouseholdIdTests(APITestCase):
+    """Content-derived ids are supplied by the client, so they can collide.
+
+    `import_commit` writes with `update_conflicts=True`, which means an
+    unguarded collision does not error -- it silently rewrites somebody else's
+    event. That is the failure this class exists to prevent.
+    """
+
+    def setUp(self):
+        self.a_user, self.a_hh, self.a_baby = make_household("theo-a")
+        self.b_user, self.b_hh, self.b_baby = make_household("theo-b")
+
+    def row(self, ident, note):
+        return {"id": str(ident), "type": "diaper",
+                "started_at": timezone.now().isoformat(), "ended_at": None,
+                "tz": "UTC", "payload": {"pee": "small"}, "notes": note}
+
+    def commit(self, user, baby, rows):
+        self.client.force_authenticate(user)
+        return self.client.post("/api/import/commit/",
+                                {"baby": str(baby.pk), "events": rows}, format="json")
+
+    def test_one_household_cannot_overwrite_another_s_event(self):
+        shared = uuid.uuid4()
+        r = self.commit(self.a_user, self.a_baby, [self.row(shared, "mine")])
+        self.assertEqual(r.json()["saved"], 1)
+
+        r = self.commit(self.b_user, self.b_baby, [self.row(shared, "theirs")])
+        self.assertEqual(r.json()["saved"], 0)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("that id belongs to another household",
+                      r.json()["skipped"][0]["errors"])
+        # The original is untouched: notes, and crucially the baby it belongs to.
+        ev = Event.objects.get(pk=shared)
+        self.assertEqual(ev.notes, "mine")
+        self.assertEqual(ev.baby_id, self.a_baby.pk)
+
+    def test_a_household_can_still_re_commit_its_own_row(self):
+        shared = uuid.uuid4()
+        self.commit(self.a_user, self.a_baby, [self.row(shared, "first")])
+        r = self.commit(self.a_user, self.a_baby, [self.row(shared, "corrected")])
+        self.assertEqual(r.json()["saved"], 1)
+        self.assertEqual(Event.objects.get(pk=shared).notes, "corrected")
+
+    def test_a_malformed_id_is_reported_not_a_500(self):
+        # 400 because nothing saved, which is the endpoint's existing
+        # convention -- the point is that it is reported per row rather than
+        # blowing up in the queryset.
+        r = self.commit(self.a_user, self.a_baby, [self.row("not-a-uuid", "x")])
+        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.json()["saved"], 0)
+        self.assertIn("id must be a UUID", r.json()["skipped"][0]["errors"])
+
+    def test_the_same_sentence_in_two_households_yields_different_ids(self):
+        from .parsing import extract_events
+        with mock.patch("events.parsing._completion", return_value={"events": [{
+                "type": "diaper", "started_at": timezone.now().isoformat(),
+                "ended_at": None, "notes": None,
+                "payload": {"pee": "small", "poo": None, "color": None,
+                            "consistency": None, "method": None, "left_sec": None,
+                            "right_sec": None, "volume_ml": None, "contents": None,
+                            "left_ml": None, "right_ml": None}}]}):
+            kw = dict(tz="UTC", now=timezone.now())
+            a = extract_events("wet diaper", scope=self.a_hh.pk, **kw)[0]["id"]
+            b = extract_events("wet diaper", scope=self.b_hh.pk, **kw)[0]["id"]
+            again = extract_events("wet diaper", scope=self.a_hh.pk, **kw)[0]["id"]
+        self.assertNotEqual(a, b, "two households must not mint the same id")
+        self.assertEqual(a, again, "the same household must still upsert")

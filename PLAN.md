@@ -891,7 +891,7 @@ server, no FCM, no APNs certificates. Add real push only when you need to notify
 
 ---
 
-### Phase 9 — Natural-language logging  ⬅ **next**
+### Phase 9 — Natural-language logging  ✅ **part 1 built**
 
 Dictate *"fed 20 minutes left side around 3, then a wet diaper"* and get
 structured events **staged as draft cards on a review screen**. Nothing is
@@ -917,10 +917,32 @@ gives an accuracy number that moves when the prompt changes, which is the thing
 most LLM side-projects never build. Keep it as a marked-slow test so it does
 not run on every `manage.py test`.
 
-#### Part 1 — one endpoint, one text field  ⬅ **build this**
+#### Part 1 — voice in, review, commit  ✅ **built and shipped**
 
 Deliberately the smallest thing that has all three properties. No tiers, no
 local model, no router, no eval harness. Those are below, and they are later.
+
+**Shipped 2026-09-01**, on `gpt-5.6-luna`. What the build changed from this
+plan, and why:
+
+- **It grew a UI.** The plan reused the import review screen; the built version
+  has its own mic and `app/review.js`, because a text box on the import screen
+  is strictly worse than tapping the Nurse tile. The mic is the feature.
+- **The ids needed the household in them.** Content-derived means two
+  households both saying "wet diaper" mint the same uuid5, and `import_commit`
+  writes with `update_conflicts=True` — an unguarded collision silently
+  rewrites somebody else's event rather than erroring. Fixed at both ends: the
+  household is in the parse key, and `import_commit` now refuses foreign ids
+  the way `EventViewSet.create` always has. The CSV importer keys on content
+  alone too and keeps doing so, because changing it would strand the 325 rows
+  already imported under the old scheme — the commit-side guard is what makes
+  that safe.
+- **Three API shapes had to be read rather than recalled.** `Events.list()`
+  returns the body, not `{data}`; `expo-speech-recognition` subscribes through
+  a *hook*, not `addSpeechRecognitionListener`; and `requiresOnDeviceRecognition`
+  fails unless `supportsOnDeviceRecognition()` says yes. All three shipped
+  broken first and all three were silent — the lesson is in *What is actually
+  left* below.
 
 **Server — `POST /api/events/parse/`.** Takes `{text}`, returns exactly the
 body `import_preview` already returns, so the client has nothing new to render:
@@ -1442,7 +1464,8 @@ timer, and the Live Activity is live on the device that owns the session.
 
 **Shipped and in daily use.** Both phones on TestFlight, both parents with
 accounts, 225 events imported, web app at babylog-app.fly.dev as a fallback.
-Phases 1–5 done. 99 Django tests, 7 node suites.
+Phases 1–5 and Phase 9 part 1 done. 117 Django tests, 7 node suites.
+325 events, none of them sleep.
 
 **Two release paths, and they are separate.** `fly deploy` ships the web app and
 the API; `eas update --branch production --environment production` ships the JS
@@ -1517,10 +1540,18 @@ silently accumulating, which is the part that actually mattered.
   sleep is not being logged. Sleep logging exists; nothing else can start until
   it has been running for a few weeks.
 
-**Next up: Phase 9 — natural-language logging.** Useful at 3am with one hand,
-and the honest showcase of what this codebase already has: a typed schema, a
-validator that does not trust its input, and a human-in-the-loop review screen
-that predates the model by four phases.
+**Phase 9 part 1 has shipped.** Voice in, draft cards, nothing written until a
+person ticks a row. `gpt-5.6-luna` at $0.20/$1.20 per MTok, so the "few dollars
+a month" estimate is closer to cents.
+
+**The unexpected consequence worth watching: sleep may unblock itself.** Phases
+6 and 7 have been parked on there being no sleep data, and the reason was never
+the schema — `Event.SLEEP` has existed since Phase 1 — it is that nobody opens
+an app to log a nap. `sleep` is in the parse schema's type enum, so *"he napped
+from two to four"* already produces a sleep event with both ends, on the review
+screen, with no new UI. If a fortnight of voice logging puts sleep rows in the
+table, Phase 6 stops being blocked by data and starts being a real next step.
+Watch the type counts rather than assuming it.
 
 **After that:**
 - **Phase 8 — Live Activities**, before the home-screen widget. An in-progress
@@ -1537,6 +1568,19 @@ Cal wants navigation. Worth revisiting only if Home starts feeling long.
 week strip is enough at ~22 events/day), CRDT sync (last-write-wins is fine for
 two people), dark mode (tokens are in one file, so it is a 30-minute change when
 the 3am screen blinds you), Android widgets, Apple Watch.
+
+**A third bug class, and the most expensive of the three: an API shape written
+from memory.** Phase 9 shipped broken three times on it — `Events.list()`
+returns the response body while `cached()` returns `{data, stale}`, so
+destructuring `{data}` off the raw call threw inside a `.catch(() => {})` and
+the badge silently never appeared; `expo-speech-recognition` subscribes through
+a *hook*, not the `addSpeechRecognitionListener` I invented, so the mic hit the
+error boundary on first tap; and `requiresOnDeviceRecognition` fails unless
+`supportsOnDeviceRecognition()` says yes, which made the sheet sit there
+looking like it was listening. Every one was silent, and none was catchable by
+a test written from the same wrong assumption. The rule is duller than a tool:
+**open the module and read the signature before calling it** — `node_modules`
+is right there, and it takes less time than one failed round trip to a phone.
 
 **A bug class worth knowing about: undefined identifiers.** Bundling does not
 resolve them, so `expo export`, `expo-doctor` and every web build pass happily

@@ -252,7 +252,7 @@ class EventViewSet(viewsets.ModelViewSet):
         hh = current_household(request)
         try:
             rows = extract_events(text, tz=hh.timezone, now=timezone.now(),
-                                  units=hh.units, draft=draft)
+                                  scope=hh.pk, units=hh.units, draft=draft)
         except Exception:
             # Upstream trouble is not the caller's fault and must not read as one.
             raise ParserUnavailable()
@@ -436,9 +436,31 @@ def import_commit(request):
         if baby is None:
             raise ValidationError("unknown baby for this household")
 
+    # Ids are derived from content and supplied by the client, so two
+    # households can arrive at the same one -- and `update_conflicts=True`
+    # below would happily rewrite whichever row already holds it. The viewset's
+    # create() has refused foreign ids since the offline outbox landed; this is
+    # the same rule for the bulk path.
+    incoming = []
+    for row in events:
+        try:
+            incoming.append(uuid.UUID(str(row.get("id"))))
+        except (ValueError, AttributeError, TypeError):
+            pass
+    foreign = set(
+        Event.objects.filter(id__in=incoming)
+        .exclude(household=household)
+        .values_list("id", flat=True)
+    )
+
     to_save, skipped = [], []
     for i, row in enumerate(events):
         errors = row_errors(row)
+        try:
+            if uuid.UUID(str(row.get("id"))) in foreign:
+                errors.append("that id belongs to another household")
+        except (ValueError, AttributeError, TypeError):
+            errors.append("id must be a UUID")
         kind = row.get("type")
         row_baby = None if kind == Event.PUMP else baby
         if row_baby is None and kind != Event.PUMP:
