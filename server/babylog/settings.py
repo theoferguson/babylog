@@ -143,7 +143,8 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.TokenAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
-    "DEFAULT_THROTTLE_RATES": {"register": "20/hour"},
+    # `parse` is the only route that costs money per call.
+    "DEFAULT_THROTTLE_RATES": {"register": "20/hour", "parse": "60/hour"},
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "PAGE_SIZE": 200,
 }
