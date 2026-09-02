@@ -1033,12 +1033,12 @@ to a model is through the validated endpoint.
 **Two operational limits this endpoint needs that no other one does**, because
 it is the first route that spends money per request:
 
-- **A per-user throttle.** `DEFAULT_THROTTLE_RATES` currently has one scope,
-  `register: 20/hour`, and there is no default throttle class
-  (`settings.py:146`). Registration is open, so without a rate cap the ceiling
-  on a stranger's spending is the OpenAI account's. One `throttle_classes` on
-  the view and one line in the existing rates dict. The utterance-length cap
-  bounds a single call; this bounds the loop.
+- **A per-user throttle.** `DEFAULT_THROTTLE_RATES` had one scope,
+  `register: 20/hour`, and no default throttle class. Accounts are invite-gated
+  — `RegisterSerializer` requires a usable code — so the exposure is a
+  household member rather than a stranger, but a phone stuck in a retry loop
+  spends just as fast as a malicious one. The utterance-length cap bounds a
+  single call; `parse: 60/hour` bounds the loop.
 - **Timeouts on both sides.** `api.js:44` hard-codes `timeoutMs = 15000` for
   every request, and an abort surfaces as `ApiError(0, 'Request timed out')`,
   which the app renders as being offline. A multi-event utterance can take
@@ -1609,6 +1609,40 @@ yet.
 **One piece of debt worth naming:** the import draft lives in client memory, so a
 refresh mid-review loses it and you re-upload. Fine at 224 rows; revisit only if
 you ever import something big.
+
+### The tenancy audit, 2026-09-01
+
+Every route checked against the question "can one household reach another's
+anything". `TenancyScopingTests` and `CrossHouseholdIdTests` pin the answers so
+they stay true.
+
+Clean, and for a consistent reason — **the household is decided server-side, never
+accepted from the client.** `perform_create` sets it on babies and events;
+`BabySerializer` has no `household` field, so a baby cannot be reassigned by
+PATCH; `InviteSerializer` is read-only but for `email`; every queryset filters
+through `for_user()` or `membership__user`; and `EventSerializer.validate`
+rejects a baby belonging to someone else. Foreign ids 404 rather than leaking
+their existence.
+
+Two things the audit did find, both from `HouseholdViewSet` being a plain
+`ModelViewSet`:
+
+- **`POST /api/households/` returned 201** and minted a household with no
+  members — unreachable afterwards by anybody, including whoever created it.
+- **`DELETE /api/households/{pk}/` returned 204 and cascaded**, taking every
+  baby and every event with it. One call, no soft delete, no confirmation —
+  while `BabyViewSet.perform_destroy` refuses to delete a baby that merely
+  *has* events. The more destructive path had the less care.
+
+Both are gone: `http_method_names = ["get", "patch", "head", "options"]`.
+Households are made at setup and nothing in the app deletes one, so the two
+verbs were free surface area rather than features.
+
+**A correction the audit forced.** Several notes here said registration was
+open. It is not, and never has been: `RegisterSerializer` requires an invite
+code that exists, is unused and is unexpired, and it is the only
+unauthenticated write in the API. That mistake had reached the portfolio
+description on a public site, where it told visitors they could sign up.
 
 ## Open questions
 

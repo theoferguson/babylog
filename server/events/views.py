@@ -38,8 +38,19 @@ def current_household(request):
 
 
 class HouseholdViewSet(viewsets.ModelViewSet):
+    """Read and edit the caller's household. Not create, and not delete.
+
+    A ModelViewSet gives both away for free, and neither is a feature here.
+    POST minted a household with no members -- invisible even to whoever
+    created it, and impossible to reach again. DELETE cascaded: one call took
+    every baby and every event with it, permanently, with none of the care
+    `BabyViewSet.perform_destroy` takes over a baby that merely has history.
+    Households are made at setup; nothing in the app deletes one.
+    """
+
     serializer_class = HouseholdSerializer
     permission_classes = [IsAuthenticated]
+    http_method_names = ["get", "patch", "head", "options"]
 
     def get_queryset(self):
         return Household.objects.filter(membership__user=self.request.user).distinct()
@@ -74,9 +85,10 @@ class ParserUnavailable(APIException):
 class ParseThrottle(throttling.UserRateThrottle):
     """Parsing is the only route that spends money per request.
 
-    Registration is open, so without a per-user cap the ceiling on a stranger's
-    spending is the API account's. The utterance-length cap bounds one call;
-    this bounds the loop.
+    Accounts are invite-gated, so the exposure is a household member rather
+    than a stranger -- but a phone stuck in a retry loop spends just as fast as
+    a malicious one. The utterance-length cap bounds a single call; this bounds
+    the loop.
     """
     scope = "parse"
 

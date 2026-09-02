@@ -1463,3 +1463,103 @@ class CrossHouseholdIdTests(APITestCase):
             again = extract_events("wet diaper", scope=self.a_hh.pk, **kw)[0]["id"]
         self.assertNotEqual(a, b, "two households must not mint the same id")
         self.assertEqual(a, again, "the same household must still upsert")
+
+
+class TenancyScopingTests(APITestCase):
+    """Every write path must decide the household server-side.
+
+    One household cannot see, change or delete another's anything -- and the
+    destructive paths need the same care as the readable ones.
+    """
+
+    def setUp(self):
+        self.a_user, self.a_hh, self.a_baby = make_household("scope-a")
+        self.b_user, self.b_hh, self.b_baby = make_household("scope-b")
+        self.a_event = Event.objects.create(
+            household=self.a_hh, baby=self.a_baby, type="diaper",
+            started_at=timezone.now(), tz="UTC", payload={"pee": "small"})
+        self.client.force_authenticate(self.b_user)   # always the outsider
+
+    def test_another_households_event_is_invisible_and_unwritable(self):
+        self.assertEqual(self.client.get(f"/api/events/{self.a_event.pk}/").status_code, 404)
+        self.assertEqual(self.client.patch(f"/api/events/{self.a_event.pk}/",
+                                           {"notes": "x"}, format="json").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/events/{self.a_event.pk}/").status_code, 404)
+
+    def test_an_event_cannot_be_attached_to_another_households_baby(self):
+        r = self.client.post("/api/events/", {
+            "baby": str(self.a_baby.pk), "type": "diaper",
+            "started_at": timezone.now().isoformat(), "payload": {"pee": "small"}},
+            format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("another household", str(r.json()))
+
+    def test_a_baby_cannot_be_read_moved_or_deleted_across_households(self):
+        self.assertEqual(self.client.get(f"/api/babies/{self.a_baby.pk}/").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/babies/{self.a_baby.pk}/").status_code, 404)
+        # `household` is not a serializer field, so it cannot be reassigned.
+        r = self.client.patch(f"/api/babies/{self.b_baby.pk}/",
+                              {"household": self.a_hh.pk}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.b_baby.refresh_from_db()
+        self.assertEqual(self.b_baby.household_id, self.b_hh.pk)
+
+    def test_another_household_is_invisible(self):
+        self.assertEqual(self.client.get("/api/households/").json()["count"], 1)
+        self.assertEqual(self.client.get(f"/api/households/{self.a_hh.pk}/").status_code, 404)
+        self.assertEqual(self.client.patch(f"/api/households/{self.a_hh.pk}/",
+                                           {"name": "x"}, format="json").status_code, 404)
+
+    def test_invites_are_scoped(self):
+        inv = Invite.objects.create(household=self.a_hh, created_by=self.a_user,
+                                    email="x@example.com")
+        self.assertEqual(self.client.get(f"/api/invites/{inv.pk}/").status_code, 404)
+        self.assertEqual(
+            self.client.post(f"/api/invites/{inv.pk}/resend/", {}, format="json").status_code,
+            404)
+
+    def test_parse_and_timer_endpoints_refuse_foreign_events(self):
+        for path in (f"/api/events/{self.a_event.pk}/timer/",
+                     f"/api/events/{self.a_event.pk}/finish/"):
+            self.assertEqual(
+                self.client.post(path, {"action": "stop"}, format="json").status_code, 404)
+
+    def test_registration_needs_an_invite(self):
+        self.client.force_authenticate(None)
+        r = self.client.post("/api/auth/register/",
+                             {"username": "stranger", "password": "correct-horse-9271"},
+                             format="json")
+        self.assertEqual(r.status_code, 400)
+        # Not open sign-up: without a usable code there is no way in.
+        self.assertFalse(User.objects.filter(username="stranger").exists())
+
+
+class HouseholdWriteSurfaceTests(APITestCase):
+    """HouseholdViewSet is a full ModelViewSet. What does that actually expose?"""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("surface")
+        Event.objects.create(household=self.hh, baby=self.baby, type="diaper",
+                             started_at=timezone.now(), tz="UTC", payload={})
+        self.client.force_authenticate(self.user)
+
+    def test_a_household_cannot_be_created_over_the_api(self):
+        # It used to 201 and mint one with no members: unreachable by anybody,
+        # including whoever made it.
+        r = self.client.post("/api/households/", {"name": "orphan"}, format="json")
+        self.assertEqual(r.status_code, 405)
+        self.assertEqual(Household.objects.count(), 1)
+
+    def test_a_household_cannot_be_deleted_over_the_api(self):
+        # It used to 204 and cascade: every baby and every event, on one call.
+        r = self.client.delete(f"/api/households/{self.hh.pk}/")
+        self.assertEqual(r.status_code, 405)
+        self.assertEqual(Baby.objects.count(), 1)
+        self.assertEqual(Event.objects.count(), 1)
+
+    def test_the_household_is_still_editable(self):
+        r = self.client.patch(f"/api/households/{self.hh.pk}/",
+                              {"feed_interval_min": 150}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.hh.refresh_from_db()
+        self.assertEqual(self.hh.feed_interval_min, 150)
