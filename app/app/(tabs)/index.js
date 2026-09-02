@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { registerScroller } from '../../src/scrollTop';
 import { Events } from '../../src/api';
 import { cached } from '../../src/cache';
+import MicButton from '../../src/MicButton';
 import OfflineBar from '../../src/OfflineBar';
 import { flush } from '../../src/outbox';
 import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../../src/days';
@@ -93,6 +94,25 @@ export default function Home() {
   const now = useNow(anyRunning) + skewMs;
   const isToday = day === todayKey(tz);
 
+  // Voice logging: parse, then hand the draft to the review screen. This
+  // screen never writes -- it does not even know what came back.
+  const speak = useCallback(async (text) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const body = await Events.parse(text);
+      if (!body.events?.length) {
+        setError(new Error("Couldn't make an event out of that. Try again?"));
+        return;
+      }
+      router.push({ pathname: '/review', params: { draft: JSON.stringify(body.events) } });
+    } catch (e) {
+      setError(e);
+    } finally {
+      setBusy(false);
+    }
+  }, [router]);
+
   const rollup = useMemo(() => {
     const feeds = events.filter((e) => e.type === 'feed');
     const nursing = feeds.filter((e) => e.payload?.method === 'breast');
@@ -154,11 +174,14 @@ export default function Home() {
           eat" is still the question, even mid-feed. */}
       <Summary latest={latest} units={units} />
 
+      {/* The mic sits in the dead centre of the four tiles, smaller than any
+          of them. It costs their inner corners, which are empty padding. */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: space }}>
         <LogButton t={types.nurse} onPress={() => router.push('/nurse')} />
         <LogButton t={types.bottle} onPress={() => router.push('/log/bottle')} />
         <LogButton t={types.diaper} onPress={() => router.push('/log/diaper')} />
         <LogButton t={types.pump} onPress={() => router.push('/log/pump')} />
+        <MicButton busy={busy} onText={speak} onError={setError} />
       </View>
 
       <OfflineBar stale={stale} onFlushed={load} />

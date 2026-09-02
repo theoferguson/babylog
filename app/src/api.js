@@ -74,7 +74,9 @@ async function request(path, { method = 'GET', body, timeoutMs = 15000 } = {}) {
 
 export const api = {
   get: (p) => request(p),
-  post: (p, body) => request(p, { method: 'POST', body }),
+  // `opts` is how a slow route raises its own timeout without changing
+  // the 15s default that suits every other call.
+  post: (p, body, opts) => request(p, { method: 'POST', body, ...opts }),
   patch: (p, body) => request(p, { method: 'PATCH', body }),
   del: (p) => request(p, { method: 'DELETE' }),
 };
@@ -186,6 +188,12 @@ export const Events = {
   },
   get: (id) => api.get(`/api/events/${id}/`),
   latest: () => api.get('/api/events/latest/'),
+
+  // A model call is slower than every other request here, and the default 15s
+  // abort would show "no connection" while the server finished and billed it.
+  parse: (text, draft) =>
+    api.post('/api/events/parse/', { text, ...(draft ? { draft } : {}) },
+             { timeoutMs: 60000 }),
   active: () => api.get('/api/events/active/'),
   // Bootstrapping a shared timer must NOT be queued: if it were, an offline tap
   // would silently enqueue an in_progress event that nothing ever finishes, and
