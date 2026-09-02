@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, Text, TextInput, View } from 'react-native';
-import { c, radius, space, types } from './theme';
+import { c, radius, space } from './theme';
 import { Button, s } from './ui';
 
 // Speech recognition is a native module, so it is only present in a build that
@@ -76,8 +76,12 @@ export default function MicButton({ inline, label, busy, onText, onError }) {
       accessibilityRole="button"
       accessibilityLabel="Log by voice"
       style={({ pressed }) => ({
-        position: 'absolute', alignSelf: 'center', top: '50%',
-        marginTop: -32, width: 64, height: 64, borderRadius: 32,
+        // Centred on both axes. `alignSelf` would only do the cross axis, and
+        // the tile grid is a row, so that centres vertically and leaves this
+        // pinned to the left edge.
+        position: 'absolute', top: '50%', left: '50%',
+        marginTop: -32, marginLeft: -32,
+        width: 64, height: 64, borderRadius: 32,
         backgroundColor: c.accent,
         // A ring of page colour, so it reads as floating above the four tiles
         // rather than a hole cut through them.
