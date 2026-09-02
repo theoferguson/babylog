@@ -893,9 +893,10 @@ server, no FCM, no APNs certificates. Add real push only when you need to notify
 
 ### Phase 9 — Natural-language logging  ⬅ **next**
 
-Type or dictate *"fed 20 minutes left side around 3, then a wet diaper"* and get
-structured events **staged in the existing import review screen**. Nothing is
-written until you tick the rows.
+Dictate *"fed 20 minutes left side around 3, then a wet diaper"* and get
+structured events **staged as draft cards on a review screen**. Nothing is
+written until you tick the rows and press save — and the same voice that
+created the draft can correct it and approve it.
 
 **Why this one is worth building.** Not because it needs a model — because the
 expensive half is already here. There is a typed schema, a per-type validator
@@ -906,25 +907,8 @@ and a parse → review → commit flow with per-row checkboxes and red warnings
 LLM features have nothing to check the model against. This one has all of it
 already, and the model gets to reuse it rather than route around it.
 
-**Three guardrails, none of them prompt-based:**
-
-- **The model proposes, it never writes.** Output goes to the review screen,
-  not the database. `import_commit` stays the only write path, which means the
-  payload-shape and unknown-key checks apply unchanged. **Note what it does
-  *not* re-check:** `import_commit` builds `Event(...)` directly
-  (`views.py:388`), so `EventSerializer.validate` — and with it `segment_span`
-  and the segment/side-total rules — never runs on an imported row. That is
-  fine for CSV rows, which carry no segments. It is the reason the parse schema
-  must whitelist rather than mirror; see below.
-- **The schema is enforced by the API, not asked for politely.** Strict
-  structured outputs constrain generation at decode time, so a field outside
-  the schema cannot be emitted. But only the schema you can *express* is
-  enforced, and a strict schema is flatter than the real one — which is why the
-  server-side validator below is load-bearing, not decorative.
-- **The parse is validated a second time server-side.** Run the model's rows
-  through `validate_payload` before they are ever rendered, and mark failures
-  red in the review UI rather than dropping them silently. Two independent
-  checks, one of which does not trust the model at all.
+The guardrails are listed once, in *Part 1* below, next to the code that
+implements them.
 
 **The eval is the part that makes it a real project.** 225 imported events are
 ground truth. Render each one back to natural language, feed it in, assert the
@@ -1295,14 +1279,65 @@ large majority and tier 2 exist only for the messy 10%. Do not pick from
 leaderboards — they measure GPQA and coding arenas, neither of which is "did it
 get the left breast and the right time". Run the eval.
 
-**What not to build here:** insight narration ("feeds ran long this week") has
-nothing to validate against and drifts toward medical advice; an LLM
+**What not to build here:** insight *narration* — a model handed a summary and
+asked to write prose about it — has nothing to validate against and drifts
+toward medical advice. That objection is about narration specifically, and
+Phase 10 below is the design that answers it; an LLM
 data-quality checker is a rules job — a four-hour nursing session is an `if`,
 not a prompt. A second candidate worth keeping in the drawer: **LLM-proposed
 import mappings**, where the model emits a column mapping for an arbitrary
 baby-tracker CSV and the existing deterministic parser executes it, with the
 parse-failure count shown before anything commits. Architecturally the stronger
 story — the model emits config, code does the work — but less useful daily.
+
+---
+
+### Phase 10 — Agentic insights *(idea, not planned)*
+
+**This is the one that should be an agent, and Phase 9 is the one that should
+not.** Worth writing down because the difference is the whole lesson. Logging
+has a known shape: text in, events out, one call, and the only "tool" an agent
+would want there is a database write — exactly what the guardrails forbid.
+Analysis has an *unknown* shape: which numbers answer "is he feeding more at
+night lately?" is not knowable before asking, which is the actual case for a
+loop.
+
+**The tools are read-only by construction, and that is the guardrail.** A small
+set of deterministic query functions over the household's own events —
+`feeds_per_day`, `inter_feed_intervals`, `nursing_minutes_by_hour`,
+`diaper_counts`, each scoped through the existing `Event.objects.for_user()`
+tenancy boundary and each returning numbers, not prose. **No write tool
+exists**, so the model cannot write whatever it decides to do. Same boundary as
+Phase 9, enforced a different way: there the human holds the pen, here the tool
+surface simply has no pen in it.
+
+**Every claim shows the query that produced it.** This is the fix for the thing
+that makes narration worthless. Render the answer with its tool calls and their
+raw results underneath — "feeds ran ~18 minutes longer after 8pm this week"
+sits directly above the numbers it came from, and a wrong claim is visibly
+wrong instead of plausibly phrased. The tool call *is* the citation. That is
+the validation narration cannot have, and it is why this design is worth
+building where narration was not.
+
+**The guardrail that is genuinely about safety, not correctness:** bounded to
+describing *this baby's own recorded data*. No comparison to norms, centiles or
+milestones, no "should", no interpretation of whether a number is a problem.
+The app has no clinical basis for any of that and a confident sentence about an
+infant's feeding is the kind of wrong that matters. Say what the data did; stop
+there.
+
+**Where it lives:** the Insights tab, which is already built and already
+computes real aggregates (`src/stats.js`) — those functions are most of the
+tool surface, so this reuses rather than adds.
+
+**Costs to bound before building:** an agent loop is an unbounded bill, so cap
+iterations and set a task budget; and cache nothing about the answers, because
+the data changes every few hours and a stale insight is worse than none.
+
+**Do not start this until Phase 9 has shipped.** Not sequencing for its own
+sake: Phase 9 is where the tool-calling seam, the model config and the spend
+guardrails get built, and this reuses all three. Built first, it would build
+them worse.
 
 ---
 
