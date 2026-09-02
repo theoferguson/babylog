@@ -13,7 +13,8 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSSpeechRecognitionUsageDescription": "Speech is turned into text on this device so you can log a feed without typing. Audio is never sent anywhere.",
-        "NSMicrophoneUsageDescription": "babylog listens only while you hold the record sheet open, to turn what you say into a feed or nappy you then check before saving."
+        "NSMicrophoneUsageDescription": "babylog listens only while you hold the record sheet open, to turn what you say into a feed or nappy you then check before saving.",
+        "NSPhotoLibraryUsageDescription": "babylog only opens a file you pick yourself when importing a data export. It never browses your photos."
       }
     },
     "android": {
