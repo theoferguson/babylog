@@ -4,14 +4,16 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
-from rest_framework import status, viewsets
+from rest_framework import status, throttling, viewsets
 from rest_framework.decorators import (action, api_view, permission_classes,
                                        throttle_classes)
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import (APIException, NotFound,
+                                       ValidationError)
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .importers.huckleberry import parse as parse_huckleberry
+from .parsing import MAX_UTTERANCE, extract_events
 from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import AnonRateThrottle
@@ -61,6 +63,22 @@ class BabyViewSet(viewsets.ModelViewSet):
             raise ValidationError(
                 "this baby has logged events -- archive instead of deleting")
         instance.delete()
+
+
+class ParserUnavailable(APIException):
+    status_code = 503
+    default_detail = ("Could not reach the parser just now. "
+                      "Try again, or log it with the buttons.")
+
+
+class ParseThrottle(throttling.UserRateThrottle):
+    """Parsing is the only route that spends money per request.
+
+    Registration is open, so without a per-user cap the ceiling on a stranger's
+    spending is the API account's. The utterance-length cap bounds one call;
+    this bounds the loop.
+    """
+    scope = "parse"
 
 
 class EventViewSet(viewsets.ModelViewSet):
@@ -209,6 +227,44 @@ class EventViewSet(viewsets.ModelViewSet):
         if not ev.in_progress:
             raise ValidationError("event is not in progress")
         return ev
+
+    # A router detail route would otherwise swallow `events/parse/` as a pk and
+    # answer 405, so this is an action rather than a standalone path.
+    @action(detail=False, methods=["post"], throttle_classes=[ParseThrottle])
+    def parse(self, request):
+        """Turn a sentence into draft events. Writes nothing.
+
+        Returns the same body as `import_preview`, so the review screen renders
+        either source unchanged and `import_commit` stays the only write path.
+        """
+        text = (request.data.get("text") or "").strip()
+        if not text:
+            raise ValidationError("nothing to parse")
+        if len(text) > MAX_UTTERANCE:
+            raise ValidationError(f"too long (max {MAX_UTTERANCE} characters)")
+
+        # A correction turn carries the draft being corrected. It is the
+        # client's copy, so it is re-validated below exactly like a fresh parse.
+        draft = request.data.get("draft")
+        if draft is not None and not isinstance(draft, list):
+            raise ValidationError("'draft' must be a list of rows")
+
+        hh = current_household(request)
+        try:
+            rows = extract_events(text, tz=hh.timezone, now=timezone.now(),
+                                  units=hh.units, draft=draft)
+        except Exception:
+            # Upstream trouble is not the caller's fault and must not read as one.
+            raise ParserUnavailable()
+
+        for row in rows:
+            # The model's output goes through the same validator the CSV
+            # importer uses. Nothing is trusted for coming from a model.
+            row["errors"] = row.pop("time_errors", []) + row_errors(row)
+
+        return Response({"tz": hh.timezone, "events": rows,
+                         "invalid": sum(1 for r in rows if r["errors"]),
+                         "already_imported": 0})
 
     @action(detail=False, methods=["get"])
     def latest(self, request):
@@ -475,3 +531,4 @@ def register(request):
     token, _ = Token.objects.get_or_create(user=user)
     return Response({"token": token.key, "username": user.username},
                     status=status.HTTP_201_CREATED)
+

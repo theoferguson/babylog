@@ -1,5 +1,6 @@
 import tempfile
 from datetime import timedelta
+from unittest import mock
 from pathlib import Path
 
 from django.contrib.auth.models import User
@@ -12,6 +13,8 @@ from django.utils.dateparse import parse_datetime
 from rest_framework.test import APITestCase
 
 from .models import Baby, Event, Household, Invite, Membership
+from .parsing import SPOKEN_FIELDS, schema
+from .serializers import PAYLOAD_FIELDS
 
 # Synthetic fixture, not real data. See events/testdata/README.md.
 CSV = Path(__file__).resolve().parent / "testdata" / "huckleberry-sample.csv"
@@ -1248,3 +1251,144 @@ class SegmentsStayHonestTests(APITestCase):
         r = self.client.post(f"/api/events/{ev}/finish/", {"at": at.isoformat()},
                              format="json")
         self.assertEqual(parse_datetime(r.json()["ended_at"]), at)
+
+
+class VoiceParseTests(APITestCase):
+    """The parse endpoint proposes; it must never be able to write.
+
+    Every case here stubs the model, so nothing reaches the network and the
+    assertions are about what happens to output we choose to be hostile.
+    """
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-voice")
+        self.client.force_authenticate(self.user)
+
+    def stub(self, events):
+        return mock.patch("events.parsing._completion",
+                          return_value={"events": events})
+
+    def parse(self, text="fed him", **kw):
+        return self.client.post("/api/events/parse/", {"text": text, **kw},
+                                format="json")
+
+    def a_feed(self, **over):
+        row = {"type": "feed", "started_at": timezone.now().isoformat(),
+               "ended_at": None, "notes": None,
+               "payload": {k: None for k in
+                           ["method", "left_sec", "right_sec", "volume_ml",
+                            "contents", "pee", "poo", "color", "consistency",
+                            "left_ml", "right_ml"]}}
+        row["payload"]["method"] = "breast"
+        row["payload"]["left_sec"] = 20 * 60
+        row.update(over)
+        return row
+
+    def test_it_writes_nothing(self):
+        before = Event.objects.count()
+        with self.stub([self.a_feed()]):
+            r = self.parse()
+        self.assertEqual(r.status_code, 200, r.json())
+        self.assertEqual(r.json()["events"][0]["payload"]["left_sec"], 1200)
+        # The whole point: a parse is a draft.
+        self.assertEqual(Event.objects.count(), before)
+
+    def test_cross_type_nulls_are_stripped(self):
+        # Strict mode forces every key onto every row. `pee: null` on a feed is
+        # an unknown key for `feed` and would fail validation if kept.
+        with self.stub([self.a_feed()]):
+            payload = self.parse().json()["events"][0]["payload"]
+        self.assertNotIn("pee", payload)
+        self.assertNotIn("left_ml", payload)
+        self.assertEqual(self.parse_errors(), [])
+
+    def parse_errors(self):
+        with self.stub([self.a_feed()]):
+            return self.parse().json()["events"][0]["errors"]
+
+    def test_a_hallucinated_field_never_reaches_the_row(self):
+        row = self.a_feed()
+        row["payload"]["mood"] = "content"
+        with self.stub([row]):
+            payload = self.parse().json()["events"][0]["payload"]
+        self.assertNotIn("mood", payload)
+
+    def test_server_owned_timer_state_is_refused(self):
+        # The dangerous one. `segments` IS a valid feed key as far as
+        # validate_payload is concerned, and import_commit builds Event()
+        # directly without EventSerializer.validate -- so if the allowlist let
+        # this through it would commit unclamped and the calendar would draw
+        # stretches nobody timed.
+        row = self.a_feed()
+        row["payload"]["segments"] = [{"side": "L", "from": "x", "to": "y"}]
+        row["payload"]["running_side"] = "L"
+        row["payload"]["running_since"] = timezone.now().isoformat()
+        with self.stub([row]):
+            payload = self.parse().json()["events"][0]["payload"]
+        for key in ("segments", "running_side", "running_since"):
+            self.assertNotIn(key, payload)
+
+    def test_a_time_in_the_future_is_flagged_not_accepted(self):
+        row = self.a_feed(started_at=(timezone.now() + timedelta(days=2000)).isoformat())
+        with self.stub([row]):
+            ev = self.parse().json()["events"][0]
+        self.assertIn("that time is in the future", ev["errors"])
+
+    def test_an_unknown_event_type_is_dropped(self):
+        with self.stub([self.a_feed(type="haircut"), self.a_feed()]):
+            body = self.parse().json()
+        self.assertEqual(len(body["events"]), 1)
+
+    def test_the_side_that_was_nursed_is_derived_not_taken(self):
+        with self.stub([self.a_feed()]):
+            self.assertEqual(self.parse().json()["events"][0]["payload"]["last_side"], "L")
+        both = self.a_feed()
+        both["payload"]["right_sec"] = 300
+        with self.stub([both]):
+            # Ambiguous, so it stays unset rather than being guessed.
+            self.assertNotIn("last_side", self.parse().json()["events"][0]["payload"])
+
+    def test_ids_are_content_derived_so_a_retry_upserts(self):
+        with self.stub([self.a_feed()]):
+            first = self.parse("fed him 20 on the left").json()["events"][0]["id"]
+        with self.stub([self.a_feed()]):
+            again = self.parse("fed him 20 on the left").json()["events"][0]["id"]
+            other = self.parse("wet diaper").json()["events"][0]["id"]
+        self.assertEqual(first, again)
+        self.assertNotEqual(first, other)
+
+    def test_empty_and_oversized_input_are_refused_before_the_model(self):
+        with mock.patch("events.parsing._completion") as called:
+            self.assertEqual(self.client.post("/api/events/parse/", {"text": "  "},
+                                              format="json").status_code, 400)
+            self.assertEqual(self.parse("x" * 5000).status_code, 400)
+            called.assert_not_called()
+
+    def test_an_upstream_failure_is_503_not_500(self):
+        with mock.patch("events.parsing._completion", side_effect=RuntimeError("boom")):
+            self.assertEqual(self.parse().status_code, 503)
+
+    def test_it_needs_authentication(self):
+        self.client.force_authenticate(None)
+        self.assertIn(self.parse().status_code, (401, 403))
+
+
+class SpokenFieldsAllowlistTests(APITestCase):
+    """The allowlist has to stay honest as the payload schema grows."""
+
+    def test_every_spoken_field_is_a_real_payload_field(self):
+        for kind, fields in SPOKEN_FIELDS.items():
+            for f in fields:
+                self.assertIn(f, PAYLOAD_FIELDS[kind],
+                              f"{kind}.{f} is not a real payload field")
+
+    def test_server_owned_fields_are_not_spoken(self):
+        for kind, fields in SPOKEN_FIELDS.items():
+            for owned in ("segments", "running_side", "running_since"):
+                self.assertNotIn(owned, fields)
+
+    def test_the_schema_only_offers_spoken_fields(self):
+        offered = set(
+            schema()["properties"]["events"]["items"]["properties"]["payload"]["required"])
+        allowed = {f for fields in SPOKEN_FIELDS.values() for f in fields}
+        self.assertEqual(offered, allowed)
