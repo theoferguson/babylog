@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
+import { useCallback, useState, useRef, useEffect } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { registerScroller } from '../../src/scrollTop';
@@ -8,6 +8,7 @@ import { cached } from '../../src/cache';
 import DayList from '../../src/DayList';
 import MicButton from '../../src/MicButton';
 import OfflineBar from '../../src/OfflineBar';
+import Rollup from '../../src/Rollup';
 import { flush } from '../../src/outbox';
 import { eventPath } from '../../src/routes';
 import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../../src/days';
@@ -115,21 +116,6 @@ export default function Home() {
     }
   }, [router]);
 
-  const rollup = useMemo(() => {
-    const feeds = events.filter((e) => e.type === 'feed');
-    const nursing = feeds.filter((e) => e.payload?.method === 'breast');
-    const mins = Math.round(nursing.reduce((a, e) => a + (e.duration_sec || 0), 0) / 60);
-    const pumped = events
-      .filter((e) => e.type === 'pump')
-      .reduce((a, e) => a + (e.payload?.left_ml || 0) + (e.payload?.right_ml || 0), 0);
-    return {
-      feeds: feeds.length,
-      mins,
-      diapers: events.filter((e) => e.type === 'diaper').length,
-      pumped,
-    };
-  }, [events]);
-
   return (
     <ScrollView
       ref={scroller}
@@ -214,13 +200,7 @@ export default function Home() {
           </Pressable>
         </View>
 
-        {events.length ? (
-          <Text style={s.muted}>
-            {rollup.feeds} feeds{rollup.mins ? ` · ${rollup.mins}m nursing` : ''} ·{' '}
-            {rollup.diapers} diapers
-            {rollup.pumped ? ` · ${Math.round(rollup.pumped)}ml pumped` : ''}
-          </Text>
-        ) : null}
+        <Rollup events={events} units={units} />
       </View>
 
       {events.length === 0 && !busy ? (

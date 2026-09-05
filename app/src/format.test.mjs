@@ -69,3 +69,8 @@ console.log('format: ok');
   assert.equal(lastNursedSide([feed('breast'), feed('breast', 'L')]), 'L');
 }
 console.log('OK  lastNursedSide');
+
+// The pumped total on the day rollup is a volume like any other: it must follow
+// the household's units, not print millilitres under an ounces setting.
+assert.equal(volume(103.51, 'imperial'), '3.5oz');
+assert.equal(volume(103.51, 'metric'), '104ml');

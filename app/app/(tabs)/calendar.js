@@ -12,6 +12,7 @@ import { weekLabel, weekOf } from '../../src/month';
 import OfflineBar from '../../src/OfflineBar';
 import { useSession } from '../../src/session';
 import DayList from '../../src/DayList';
+import Rollup from '../../src/Rollup';
 import { eventPath } from '../../src/routes';
 import { c, space, styleFor } from '../../src/theme';
 import Timeline from '../../src/Timeline';
@@ -173,12 +174,12 @@ export default function Calendar() {
         <Text style={[s.muted, { marginTop: 16 }]}>Nothing logged on this day.</Text>
       ) : mode === 'day' ? (
         <>
-          <Rollup events={dayEvents} units={units} />
+          <Rollup events={dayEvents} units={units} style={{ marginTop: 10 }} />
           <Timeline events={dayEvents} units={units} tz={tz} onPress={openEvent} />
         </>
       ) : (
         <>
-          <Rollup events={dayEvents} units={units} />
+          <Rollup events={dayEvents} units={units} style={{ marginTop: 10 }} />
           <DayList events={dayEvents} units={units} onPress={openEvent}
                    label={dayLabel(day, tz)} />
         </>
@@ -198,21 +199,4 @@ export default function Calendar() {
   );
 }
 
-function Rollup({ events, units }) {
-  const feeds = events.filter((e) => e.type === 'feed');
-  const mins = Math.round(
-    feeds.filter((e) => e.payload?.method === 'breast')
-      .reduce((a, e) => a + (e.duration_sec || 0), 0) / 60,
-  );
-  const diapers = events.filter((e) => e.type === 'diaper').length;
-  const pumped = events.filter((e) => e.type === 'pump')
-    .reduce((a, e) => a + (e.payload?.left_ml || 0) + (e.payload?.right_ml || 0), 0);
-  if (!events.length) return null;
-  return (
-    <Text style={[s.muted, { marginTop: 10 }]}>
-      {feeds.length} feeds{mins ? ` · ${mins}m nursing` : ''} · {diapers} diapers
-      {pumped ? ` · ${Math.round(pumped)}ml pumped` : ''}
-    </Text>
-  );
-}
 
