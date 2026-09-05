@@ -176,20 +176,16 @@ export default function Home() {
           eat" is still the question, even mid-feed. */}
       <Summary latest={latest} units={units} />
 
-      {/* The mic sits in the dead centre of the four tiles, smaller than any
-          of them. It costs their inner corners, which are empty padding. */}
+      {/* One grid, so the mic's dead centre is the centre of the middle row --
+          it sits in the gap between Diaper and Pump, smaller than either. */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: space }}>
         <LogButton t={types.nurse} onPress={() => router.push('/nurse')} />
         <LogButton t={types.bottle} onPress={() => router.push('/log/bottle')} />
         <LogButton t={types.diaper} onPress={() => router.push('/log/diaper')} />
         <LogButton t={types.pump} onPress={() => router.push('/log/pump')} />
-        <MicButton busy={busy} onText={speak} />
-      </View>
-      {/* Their own row: the mic is centred on the four above it, and the centre
-          of a six-tile grid lands on a tile rather than between them. */}
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
         <LogButton t={types.sleep} onPress={() => router.push('/sleep')} />
         <LogButton t={types.other} onPress={() => router.push('/log/custom')} />
+        <MicButton busy={busy} onText={speak} />
       </View>
 
       <OfflineBar stale={stale} onFlushed={load} />

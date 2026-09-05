@@ -324,9 +324,9 @@ Last-event summary on top, log buttons under it, today's timeline below:
 │ Last diaper    47m ago  │
 │ Last pump    3h 02m ago │
 ├─────────────────────────┤
-│ [ NURSE  ]  [ BOTTLE ]  │   2x2 grid, colour-coded per type,
-│ [ DIAPER ]🎤[ PUMP   ]  │   mic dead centre of the four
-│ [ SLEEP  ]  [ OTHER  ]  │   the two less-frequent ones, own row
+│ [ NURSE  ]  [ BOTTLE ]  │   2x3 grid, colour-coded per type,
+│ [ DIAPER ]🎤[ PUMP   ]  │   mic in the gap at the dead centre
+│ [ SLEEP  ]  [ OTHER  ]  │
 ├─────────────────────────┤
 │ ▸ today's timeline...   │
 └─────────────────────────┘
