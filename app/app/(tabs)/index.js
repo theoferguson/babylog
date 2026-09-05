@@ -5,14 +5,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { registerScroller } from '../../src/scrollTop';
 import { Events } from '../../src/api';
 import { cached } from '../../src/cache';
+import DayList from '../../src/DayList';
 import MicButton from '../../src/MicButton';
 import OfflineBar from '../../src/OfflineBar';
 import { flush } from '../../src/outbox';
+import { eventPath } from '../../src/routes';
 import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../../src/days';
 import { ago, clock, countdown, summarize, timeOfDay } from '../../src/format';
 import { useSession } from '../../src/session';
 import * as localTimer from '../../src/localTimer';
-import { c, space, styleFor, types } from '../../src/theme';
+import { c, space, styleFor, titleFor, types } from '../../src/theme';
 import Timeline from '../../src/Timeline';
 import WeekStrip from '../../src/WeekStrip';
 import { ErrorNote, s } from '../../src/ui';
@@ -90,7 +92,7 @@ export default function Home() {
       ? [{ key: 'local', state: offlineTimer, event: null, offline: true }]
       : []),
   ];
-  const anyRunning = banners.some((b) => b.state.running_side);
+  const anyRunning = banners.some((b) => b.state.running_since);
   const now = useNow(anyRunning) + skewMs;
   const isToday = day === todayKey(tz);
 
@@ -167,7 +169,7 @@ export default function Home() {
           offline={b.offline}
           babyName={babies.length > 1 ? babies.find((x) => x.id === b.event?.baby)?.name : null}
           now={now}
-          onPress={() => router.push('/nurse')}
+          onPress={() => router.push(b.event ? eventPath(b.event) : '/nurse')}
         />
       ))}
       {/* The summary stays visible alongside a running timer: "when did he last
@@ -182,6 +184,12 @@ export default function Home() {
         <LogButton t={types.diaper} onPress={() => router.push('/log/diaper')} />
         <LogButton t={types.pump} onPress={() => router.push('/log/pump')} />
         <MicButton busy={busy} onText={speak} />
+      </View>
+      {/* Their own row: the mic is centred on the four above it, and the centre
+          of a six-tile grid lands on a tile rather than between them. */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
+        <LogButton t={types.sleep} onPress={() => router.push('/sleep')} />
+        <LogButton t={types.other} onPress={() => router.push('/log/custom')} />
       </View>
 
       <OfflineBar stale={stale} onFlushed={load} />
@@ -223,47 +231,15 @@ export default function Home() {
         <Text style={[s.muted, { marginTop: 12 }]}>Nothing logged on this day.</Text>
       ) : view === 'timeline' ? (
         <Timeline events={events} units={units} tz={tz}
-                  onPress={(e) => router.push(e.in_progress ? '/nurse' : `/event/${e.id}`)} />
+                  onPress={(e) => router.push(eventPath(e))} />
       ) : (
-        <DayList events={events} units={units} router={router} />
+        <DayList events={events} units={units}
+                 onPress={(e) => router.push(eventPath(e))} />
       )}
     </ScrollView>
   );
 }
 
-function DayList({ events, units, router }) {
-  const rows = [...events].sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
-  return (
-    <View style={{ marginTop: 8 }}>
-      {rows.map((e) => {
-        const t = styleFor(e);
-        return (
-          <Pressable
-            key={e.id}
-            onPress={() => router.push(e.in_progress ? '/nurse' : `/event/${e.id}`)}
-            accessibilityRole="button"
-            style={({ pressed }) => ({
-              flexDirection: 'row', alignItems: 'center', gap: 10,
-              paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.border,
-              opacity: pressed ? 0.6 : 1,
-            })}
-          >
-            <View style={{ width: 8, height: 32, borderRadius: 4, backgroundColor: t.ink }} />
-            <Text style={{ fontSize: 15 }}>{t.icon}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontWeight: '700', color: c.text }}>
-                {t.label}
-                {e.in_progress ? ' · running' : ''}
-              </Text>
-              <Text style={s.muted}>{summarize(e, units) || '—'}</Text>
-            </View>
-            <Text style={s.muted}>{timeOfDay(e.started_at)}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
 
 // When the next feed is expected. Measured from the last feed's START, so a
 // long nursing session does not push the next one out by its own length.
@@ -330,6 +306,14 @@ function Summary({ latest, units }) {
 // banner renders both.
 function fromEvent(e) {
   const p = e.payload || {};
+  // A sleep has no sides and cannot be paused: it has been running since it
+  // started, so the whole span is the elapsed time.
+  if (e.type === 'sleep') {
+    return {
+      started_at: e.started_at, left_sec: 0, right_sec: 0,
+      running_side: null, running_since: e.started_at, sleeping: true,
+    };
+  }
   return {
     started_at: e.started_at,
     right_sec: p.right_sec || 0,
@@ -357,7 +341,8 @@ function RunningBanner({ state, event, offline, babyName, now, onPress }) {
         {t.icon} {babyName ? `${babyName} · ` : ''}{t.label} · {clock(total)}
       </Text>
       <Text style={{ color: c.text, marginTop: 4 }}>
-        {state.running_side ? `${state.running_side} side running` : 'Paused'}
+        {state.sleeping ? 'Sleeping'
+          : state.running_side ? `${state.running_side} side running` : 'Paused'}
         {offline ? ' · on this phone only' : ''} — tap to open
       </Text>
     </Pressable>

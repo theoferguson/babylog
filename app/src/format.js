@@ -80,5 +80,7 @@ export function summarize(e, units) {
     return total ? volume(total, units) : null;
   }
   if (e.type === 'sleep') return mins(e.duration_sec);
-  return p.label || null;
+  // A free-form event's label is already its title, so the second line is the
+  // free text or nothing -- not the title printed twice.
+  return e.notes || null;
 }

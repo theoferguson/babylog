@@ -5,7 +5,7 @@ import { Events } from '../../src/api';
 import DateTimeField from '../../src/DateTimeField';
 import EventFields from '../../src/EventFields';
 import { useSession } from '../../src/session';
-import { c, space, styleFor } from '../../src/theme';
+import { c, space, styleFor, titleFor } from '../../src/theme';
 import { Button, ErrorNote, s } from '../../src/ui';
 
 // Every event on the calendar opens here. One editor for all types rather than a
@@ -86,7 +86,7 @@ export default function EditEvent() {
   return (
     <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
       <Text style={s.h2}>
-        {t.icon} {t.label}
+        {t.icon} {titleFor({ ...event, payload })}
       </Text>
 
       <View style={{ gap: 8 }}>

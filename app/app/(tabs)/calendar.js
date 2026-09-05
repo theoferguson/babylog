@@ -11,6 +11,8 @@ import { summarize, timeOfDay } from '../../src/format';
 import { weekLabel, weekOf } from '../../src/month';
 import OfflineBar from '../../src/OfflineBar';
 import { useSession } from '../../src/session';
+import DayList from '../../src/DayList';
+import { eventPath } from '../../src/routes';
 import { c, space, styleFor } from '../../src/theme';
 import Timeline from '../../src/Timeline';
 import WeekView from '../../src/WeekView';
@@ -86,7 +88,7 @@ export default function Calendar() {
 
   const dayEvents = byDay[day] || [];
   const isToday = day === todayKey(tz);
-  const openEvent = (e) => router.push(e.in_progress ? '/nurse' : `/event/${e.id}`);
+  const openEvent = (e) => router.push(eventPath(e));
 
   // The date and the mode toggle stay pinned while scrolling: a day of 20+
   // events scrolls the heading away, and a list of bare times then says nothing
@@ -214,47 +216,3 @@ function Rollup({ events, units }) {
   );
 }
 
-function DayList({ events, units, onPress, label }) {
-  const rows = [...events].sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
-  return (
-    <View style={{ marginTop: 8 }}>
-      {label ? (
-        <Text
-          style={{
-            fontSize: 12, fontWeight: '700', color: c.muted,
-            textTransform: 'uppercase', letterSpacing: 0.5,
-            paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: c.border,
-          }}
-        >
-          {label}
-        </Text>
-      ) : null}
-      {rows.map((e) => {
-        const t = styleFor(e);
-        return (
-          <Pressable
-            key={e.id}
-            onPress={() => onPress(e)}
-            accessibilityRole="button"
-            style={({ pressed }) => ({
-              flexDirection: 'row', alignItems: 'center', gap: 10,
-              paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: c.border,
-              opacity: pressed ? 0.6 : 1,
-            })}
-          >
-            <View style={{ width: 8, height: 32, borderRadius: 4, backgroundColor: t.ink }} />
-            <Text style={{ fontSize: 15 }}>{t.icon}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontWeight: '700', color: c.text }}>
-                {t.label}
-                {e.in_progress ? ' · running' : ''}
-              </Text>
-              <Text style={s.muted}>{summarize(e, units) || '—'}</Text>
-            </View>
-            <Text style={s.muted}>{timeOfDay(e.started_at)}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}

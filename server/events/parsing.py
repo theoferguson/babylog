@@ -40,14 +40,14 @@ SPOKEN_FIELDS = {
     Event.DIAPER: ["pee", "poo", "color", "consistency"],
     Event.PUMP: ["left_ml", "right_ml"],
     Event.SLEEP: [],
-    Event.NOTE: [],
+    Event.NOTE: ["label"],
 }
 SPOKEN_TYPES = list(SPOKEN_FIELDS)
 
 # Field -> JSON type, for the flat schema below.
 _JSON_TYPE = {
     "method": "string", "contents": "string", "pee": "string", "poo": "string",
-    "color": "string", "consistency": "string",
+    "color": "string", "consistency": "string", "label": "string",
     "left_sec": "integer", "right_sec": "integer",
     "volume_ml": "number", "left_ml": "number", "right_ml": "number",
 }
@@ -100,6 +100,7 @@ Return ISO-8601 with an offset. If no time is mentioned, use the current time.
 - Nursing: put the minutes on left_sec/right_sec as SECONDS, and set \
 method="breast". A bottle sets method="bottle" and volume_ml.
 - pee and poo are one of: small, medium, large.
+- Anything that is not a feed, diaper, pump or sleep is type "note": put a short title on label ("vitamin D", "2 month checkup").
 - Never invent a detail that was not said. Leave a field null instead.
 - If the note describes nothing loggable, return an empty events list.
 """

@@ -1,6 +1,7 @@
 import { Text, TextInput, View } from 'react-native';
 import { Choice } from './InstantForm';
 import { toMl, volume } from './format';
+import { c } from './theme';
 import { s } from './ui';
 
 const opts = (vs) => vs.map((v) => ({ value: v, label: v }));
@@ -36,6 +37,20 @@ export default function EventFields({ type, payload, setP, units, disabled }) {
             </>
           ) : null}
         </>
+      ) : null}
+
+      {type === 'note' ? (
+        <View style={{ gap: 6 }}>
+          <Text style={s.body}>Title</Text>
+          <TextInput
+            style={s.input}
+            editable={!disabled}
+            defaultValue={payload.label || ''}
+            placeholder="What happened"
+            placeholderTextColor={c.muted}
+            onChangeText={(v) => setP({ label: v.trim() || undefined })}
+          />
+        </View>
       ) : null}
 
       {isBreast ? (

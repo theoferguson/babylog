@@ -42,7 +42,9 @@ PAYLOAD_FIELDS = {
                    "head_cm": (float, False)},
     Event.MED: {"name": (str, False), "dose": (float, False), "unit": (str, False)},
     Event.MILESTONE: {"label": (str, False)},
-    Event.NOTE: {},
+    # Free-form events -- a medication, an appointment, "first smile".
+    # The label is the title shown on the calendar.
+    Event.NOTE: {"label": (str, False)},
 }
 SIZES = {"small", "medium", "large"}
 

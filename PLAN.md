@@ -294,11 +294,22 @@ when you're logging late. No pickers in the fast path.
   Two taps to save; 92 of 96 of your rows carry no notes.
 - **Pump** — two volume fields, one per side, and a total.
 
-#### Sleep — both entry paths *(when you start tracking it)*
-- **"Asleep now" / "Awake now"** buttons — two timestamps at two moments, no
-  visible running timer.
-- **Two time pickers** for backfill, because sleep is the type most often logged
-  after the fact.
+#### Sleep — shipped
+- **A timer**, not two buttons: "Fell asleep" starts a server-side `in_progress`
+  sleep, "Woke up" calls the same generic `finish` a feed uses. It is on the
+  server rather than the phone so one parent can start it and the other stop it,
+  the same reason a feed is. No sides, nothing to bank between taps, so none of
+  nurse.js's timer-intent machinery is needed — which is why `/sleep` is 100
+  lines and `/nurse` is 400.
+- **No offline shadow timer** yet, unlike nursing. Marked in the code.
+- Backfill is the editor: the timeline start and end are both editable after the
+  fact, which is what the two time pickers were for.
+
+#### Something else — shipped
+The sixth button. A `note` event whose `payload.label` is a title — a
+medication, an appointment, "first smile" — shown as the event's name wherever
+an event is listed. `titleFor()` is what puts it there: a free-form event is its
+title, everything else is its type. Voice can title one too ("gave vitamin D").
 
 ### Home screen
 
@@ -313,8 +324,9 @@ Last-event summary on top, log buttons under it, today's timeline below:
 │ Last diaper    47m ago  │
 │ Last pump    3h 02m ago │
 ├─────────────────────────┤
-│ [ NURSE  ]  [ BOTTLE ]  │   2x2 grid, colour-coded per type
-│ [ DIAPER ]  [ PUMP   ]  │
+│ [ NURSE  ]  [ BOTTLE ]  │   2x2 grid, colour-coded per type,
+│ [ DIAPER ]🎤[ PUMP   ]  │   mic dead centre of the four
+│ [ SLEEP  ]  [ OTHER  ]  │   the two less-frequent ones, own row
 ├─────────────────────────┤
 │ ▸ today's timeline...   │
 └─────────────────────────┘
@@ -1537,8 +1549,9 @@ silently accumulating, which is the part that actually mattered.
 
 **Blocked on data, correctly:**
 - **Phase 6 predictions** and **Phase 7 reminders** both need sleep history, and
-  sleep is not being logged. Sleep logging exists; nothing else can start until
-  it has been running for a few weeks.
+  sleep is not being logged. Sleep now has a timer on the home screen as well as
+  the voice path, which is two more ways in than it had; nothing else can start
+  until a few weeks of rows exist.
 
 **Phase 9 part 1 has shipped.** Voice in, draft cards, nothing written until a
 person ticks a row. `gpt-5.6-luna` at $0.20/$1.20 per MTok, so the "few dollars

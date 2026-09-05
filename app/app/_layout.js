@@ -50,6 +50,8 @@ function Gate() {
         <Stack.Screen name="log/bottle" options={{ title: 'Bottle' }} />
         <Stack.Screen name="log/diaper" options={{ title: 'Diaper' }} />
         <Stack.Screen name="log/pump" options={{ title: 'Pump' }} />
+        <Stack.Screen name="log/custom" options={{ title: 'Something else' }} />
+        <Stack.Screen name="sleep" options={{ title: 'Sleep' }} />
         <Stack.Screen name="import" options={{ title: 'Import' }} />
         <Stack.Screen name="review" options={{ title: 'Check this' }} />
         <Stack.Screen name="event/[id]" options={{ title: 'Edit event' }} />

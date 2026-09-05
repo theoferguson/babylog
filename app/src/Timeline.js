@@ -1,6 +1,6 @@
 import { Pressable, Text, View } from 'react-native';
 import { summarize, timeOfDay } from './format';
-import { c, styleFor } from './theme';
+import { c, styleFor, titleFor } from './theme';
 import { layout, usableSegments, visibleSpanSec } from './timelineLayout';
 
 const HOUR = 44; // px per hour
@@ -112,7 +112,7 @@ export default function Timeline({ events, units, tz, onPress }) {
                     numberOfLines={1}
                     style={{ fontSize: 12, fontWeight: '700', color: c.text, flexShrink: 1 }}
                   >
-                    {t.label}
+                    {titleFor(e)}
                     {e.in_progress ? ' · running' : ''}
                   </Text>
                   {roomy && detail ? (

@@ -33,6 +33,10 @@ assert.equal(
 assert.equal(summarize({ type: 'feed', payload: { method: 'bottle', volume_ml: 103.51 } }, 'imperial'), '3.5oz');
 assert.equal(summarize({ type: 'diaper', payload: { pee: 'medium', poo: 'large' } }), 'pee medium, poo large');
 assert.equal(summarize({ type: 'pump', payload: { left_ml: 59.15, right_ml: 44.36 } }, 'imperial'), '3.5oz');
+// The label is the title of a free-form event, so the detail line must not
+// repeat it -- it carries the free text, or nothing.
+assert.equal(summarize({ type: 'note', payload: { label: 'Vitamin D' } }), null);
+assert.equal(summarize({ type: 'note', notes: '400 IU', payload: { label: 'Vitamin D' } }), '400 IU');
 // A single-side feed omits the side it did not use.
 assert.equal(
   summarize({ type: 'feed', duration_sec: 540, payload: { method: 'breast', left_sec: 540 } }),
