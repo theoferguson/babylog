@@ -37,5 +37,11 @@ export function styleFor(event) {
   return types[event.type] || types.other;
 }
 
+// What to call an event in a list. A free-form event carries its own title --
+// "Vitamin D" is the whole point of logging it, and "Other" is not.
+export function titleFor(event) {
+  return event.payload?.label || styleFor(event).label;
+}
+
 export const radius = 14;
 export const space = 16;

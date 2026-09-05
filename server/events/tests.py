@@ -1563,3 +1563,68 @@ class HouseholdWriteSurfaceTests(APITestCase):
         self.assertEqual(r.status_code, 200, r.json())
         self.hh.refresh_from_db()
         self.assertEqual(self.hh.feed_interval_min, 150)
+
+
+class SleepTimerTests(APITestCase):
+    """A sleep is a timer with no sides: start it, finish it, and it must not
+    fork any more readily than a feed does."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-sleep")
+        self.client.force_authenticate(self.user)
+
+    def start(self, kind="sleep"):
+        return self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": kind,
+            "started_at": timezone.now().isoformat(), "in_progress": True,
+            "payload": {"method": "breast"} if kind == "feed" else {}}, format="json")
+
+    def test_finish_closes_it_without_any_timer_intents(self):
+        ev = self.start().json()
+        r = self.client.post(f"/api/events/{ev['id']}/finish/", {}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json()["in_progress"])
+        self.assertIsNotNone(r.json()["ended_at"])
+        # No segments, so the span is start..finish rather than nothing at all.
+        self.assertEqual(r.json()["started_at"], ev["started_at"])
+
+    def test_a_second_start_returns_the_running_sleep(self):
+        first = self.start()
+        second = self.start()
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.json()["id"], first.json()["id"])
+        self.assertEqual(Event.objects.filter(type="sleep").count(), 1)
+
+    def test_a_sleep_can_start_while_a_feed_runs(self):
+        feed = self.start("feed")
+        sleep = self.start()
+        self.assertEqual(sleep.status_code, 201)
+        self.assertNotEqual(sleep.json()["id"], feed.json()["id"])
+        self.assertEqual(len(self.client.get("/api/events/active/").json()["events"]), 2)
+
+
+class CustomEventTests(APITestCase):
+    """The free-form event: a title is the whole point of it."""
+
+    def setUp(self):
+        self.user, self.hh, self.baby = make_household("theo-note")
+        self.client.force_authenticate(self.user)
+
+    def post(self, payload):
+        return self.client.post("/api/events/", {
+            "baby": str(self.baby.pk), "type": "note",
+            "started_at": timezone.now().isoformat(),
+            "payload": payload}, format="json")
+
+    def test_a_note_carries_a_label(self):
+        r = self.post({"label": "Vitamin D"})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.json()["payload"]["label"], "Vitamin D")
+
+    def test_unknown_note_keys_are_still_rejected(self):
+        self.assertEqual(self.post({"dose": 400}).status_code, 400)
+
+    def test_the_parser_may_title_a_note(self):
+        self.assertIn("label", SPOKEN_FIELDS[Event.NOTE])
+        self.assertIn("label", schema()["properties"]["events"]["items"]
+                      ["properties"]["payload"]["properties"])

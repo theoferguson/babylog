@@ -85,7 +85,7 @@ sleep     {}                             # duration derives from start/end
 growth    {weight_g, height_cm, head_cm}
 med       {name, dose, unit}
 milestone {label}
-note      {}
+note      {label}                        # free-form: the title on the calendar
 ```
 
 **Why JSONB and not real columns:** adding an event type becomes a serializer +
@@ -294,11 +294,22 @@ when you're logging late. No pickers in the fast path.
   Two taps to save; 92 of 96 of your rows carry no notes.
 - **Pump** — two volume fields, one per side, and a total.
 
-#### Sleep — both entry paths *(when you start tracking it)*
-- **"Asleep now" / "Awake now"** buttons — two timestamps at two moments, no
-  visible running timer.
-- **Two time pickers** for backfill, because sleep is the type most often logged
-  after the fact.
+#### Sleep — shipped
+- **A timer**, not two buttons: "Fell asleep" starts a server-side `in_progress`
+  sleep, "Woke up" calls the same generic `finish` a feed uses. It is on the
+  server rather than the phone so one parent can start it and the other stop it,
+  the same reason a feed is. No sides, nothing to bank between taps, so none of
+  nurse.js's timer-intent machinery is needed — which is why `/sleep` is 100
+  lines and `/nurse` is 400.
+- **No offline shadow timer** yet, unlike nursing. Marked in the code.
+- Backfill is the editor: the timeline start and end are both editable after the
+  fact, which is what the two time pickers were for.
+
+#### Something else — shipped
+The sixth button. A `note` event whose `payload.label` is a title — a
+medication, an appointment, "first smile" — shown as the event's name wherever
+an event is listed. `titleFor()` is what puts it there: a free-form event is its
+title, everything else is its type. Voice can title one too ("gave vitamin D").
 
 ### Home screen
 
@@ -313,8 +324,9 @@ Last-event summary on top, log buttons under it, today's timeline below:
 │ Last diaper    47m ago  │
 │ Last pump    3h 02m ago │
 ├─────────────────────────┤
-│ [ NURSE  ]  [ BOTTLE ]  │   2x2 grid, colour-coded per type
-│ [ DIAPER ]  [ PUMP   ]  │
+│ [ NURSE  ]  [ BOTTLE ]  │   2x3 grid, colour-coded per type,
+│ [ DIAPER ]🎤[ PUMP   ]  │   mic in the gap at the dead centre
+│ [ SLEEP  ]  [ OTHER  ]  │
 ├─────────────────────────┤
 │ ▸ today's timeline...   │
 └─────────────────────────┘
@@ -864,8 +876,9 @@ prediction feature runs on sleep history, so this phase cannot start until Phase
 2 has been shipping sleep logs for a few weeks.
 
 Two consequences worth acting on now:
-- Ship sleep logging in Phase 2 anyway, even though it imports nothing. It is
-  the input to everything in Phases 6 and 7.
+- ~~Ship sleep logging in Phase 2 anyway~~ — done. A timer on the home screen
+  and a voice path. Whether it gets *used* is now the open question, and it is
+  a habit question rather than a software one.
 - The feed data you *do* have supports a real prediction today — next feed due,
   from rolling median inter-feed interval. 109 rows over 10 days is thin but not
   nothing, and it's the same machinery. Do that one first.
@@ -1437,22 +1450,24 @@ timer, and the Live Activity is live on the device that owns the session.
 - **CSV decoded**; the real export stays out of the repo, tests use a
   synthetic fixture.
 - **Pump stores both volumes**, displays the total. Side labels provisional.
-- **Sleep/predictions parked** until you're recording sleep. Sleep logging still
-  ships in Phase 2 so the data starts accumulating.
+- **Sleep/predictions parked** until you're recording sleep. Sleep logging has
+  shipped — a timer, plus the voice path — so the data can start accumulating.
 - **Day view is core, not later.** Merged into Phase 2 alongside logging.
 - **Month grid dropped.** Huckleberry's cross-day view is the week; a month grid
   is unreadable at 22 events/day. Week strip + list view instead.
-- **Logging is bespoke per type.** No generic form. **Nurse is the only timer** —
-  two mutually-exclusive accumulating sides, then Save. Everything else is
-  instant with the timestamp defaulting to now.
+- **Logging is bespoke per type.** No generic form; the free-form event is a
+  `note` with a title, which is a bespoke form of one field. **Two timers**:
+  nursing (two mutually-exclusive accumulating sides, then Save) and sleep (one
+  stretch, no sides). Everything else is instant, timestamped now.
 - **Configurable = babies and users.** A settings screen with two lists, not a
   widget system.
-- **Sleep gets both** live buttons and backfill pickers, when it starts.
+- **Sleep is a timer**, not two buttons: start and stop, server-side like a
+  feed, so either parent can end it. Backfill is the event editor.
 - **Timers are shared and live across devices.** An in-progress feed is an
   `Event` with `ended_at = null`, created on first tap; the server owns the
   accumulators; clients poll every 3s while one is running.
-- **Home screen** = last-event summary (relative times) → 2x2 log buttons →
-  today's timeline.
+- **Home screen** = last-event summary (relative times) → 2x3 log buttons with
+  the mic in the middle → today's timeline.
 - **Phase 4 rescoped**: cache + write outbox, no sync engine. Offline nursing
   still to do.
 - **Insights are client-side**, median-based, and only average over days that
@@ -1460,12 +1475,13 @@ timer, and the Live Activity is live on the device that owns the session.
 - **iOS widgets + Live Activities** are Phase 8 — native WidgetKit work, App
   Group for data, `Text(style: .timer)` for ticking, App Intents for buttons.
 
-## Where this stands — 2026-09-01
+## Where this stands — 2026-09-05
 
 **Shipped and in daily use.** Both phones on TestFlight, both parents with
 accounts, 225 events imported, web app at babylog-app.fly.dev as a fallback.
-Phases 1–5 and Phase 9 part 1 done. 117 Django tests, 7 node suites.
-325 events, none of them sleep.
+Phases 1–5 and Phase 9 part 1 done. 133 Django tests, 13 node suites.
+403 events: 193 feeds, 175 diapers, 34 pumps, 1 free-form — and still no
+sleep, three hours after the sleep timer shipped. Watch that number.
 
 **Two release paths, and they are separate.** `fly deploy` ships the web app and
 the API; `eas update --branch production --environment production` ships the JS
@@ -1537,8 +1553,9 @@ silently accumulating, which is the part that actually mattered.
 
 **Blocked on data, correctly:**
 - **Phase 6 predictions** and **Phase 7 reminders** both need sleep history, and
-  sleep is not being logged. Sleep logging exists; nothing else can start until
-  it has been running for a few weeks.
+  sleep is not being logged. Sleep now has a timer on the home screen as well as
+  the voice path, which is two more ways in than it had; nothing else can start
+  until a few weeks of rows exist.
 
 **Phase 9 part 1 has shipped.** Voice in, draft cards, nothing written until a
 person ticks a row. `gpt-5.6-luna` at $0.20/$1.20 per MTok, so the "few dollars
@@ -1560,9 +1577,11 @@ Watch the type counts rather than assuming it.
 - **A learned feed interval**, per the note in Phase 6. Small, and the only
   thing here that gets better the longer the app runs.
 
-**Home and Cal both draw today's timeline.** Harmless duplication left over
-from Cal being newer, and not obviously wrong — Home wants the day at a glance,
-Cal wants navigation. Worth revisiting only if Home starts feeling long.
+**Home and Cal both draw today's timeline.** Not obviously wrong — Home wants
+the day at a glance, Cal wants navigation. The *components* are no longer
+duplicated: `DayList` and `Rollup` were each written twice and have been
+extracted, which is how the pumped total came to print millilitres under an
+ounces setting in one copy. Two screens, one component each.
 
 **Things deliberately not built**, each still the right call: month grid (the
 week strip is enough at ~22 events/day), CRDT sync (last-write-wins is fine for
