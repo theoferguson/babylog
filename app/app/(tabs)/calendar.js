@@ -119,7 +119,7 @@ export default function Calendar() {
           <Text style={s.h1}>{mode === 'week' ? weekLabel(week) : dayLabel(day, tz)}</Text>
           <Text style={{ fontSize: 14, color: c.muted }}>▾</Text>
         </Pressable>
-        <Pressable onPress={() => router.push('/settings')} accessibilityRole="button">
+        <Pressable onPress={() => router.push('/settings')} accessibilityRole="button" hitSlop={12}>
           <Text style={s.muted}>Settings</Text>
         </Pressable>
       </View>

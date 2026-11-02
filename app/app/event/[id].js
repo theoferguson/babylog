@@ -84,7 +84,7 @@ export default function EditEvent() {
   const setP = (patch) => setPayload((p) => ({ ...p, ...patch }));
   const shift = (m) => setStartedAt((d) => new Date(d.getTime() + m * 60000));
   return (
-    <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
       <Text style={s.h2}>
         {t.icon} {titleFor({ ...event, payload })}
       </Text>

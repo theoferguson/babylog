@@ -87,7 +87,7 @@ export default function DayPicker({ visible, selected, tz, counts, onPick, onClo
           </View>
 
           <Pressable onPress={() => { onPick(today); onClose(); }} accessibilityRole="button"
-                     style={{ alignItems: 'center', paddingVertical: 8 }}>
+                     hitSlop={6} style={{ alignItems: 'center', paddingVertical: 8 }}>
             <Text style={{ color: c.accent, fontWeight: '600' }}>Today</Text>
           </Pressable>
         </Pressable>

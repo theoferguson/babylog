@@ -42,7 +42,7 @@ export default function Settings() {
   }
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 22, paddingBottom: 48 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" style={s.screen} contentContainerStyle={{ padding: space, gap: 22, paddingBottom: 48 }}>
       <HouseholdCard household={household} busy={busy} onSave={(patch) =>
         guard(() => api.patch(`/api/households/${household.id}/`, patch))} />
 

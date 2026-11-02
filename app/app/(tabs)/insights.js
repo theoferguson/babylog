@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState, useRef, useEffect } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ScrollView, Text, View } from 'react-native';
 import { Events } from '../../src/api';
 import Bars, { Stat } from '../../src/Bars';
@@ -25,6 +26,7 @@ const NIGHT_KEY = 'babylog.nightWindow';
 export default function Insights() {
   const scroller = useRef(null);
   useEffect(() => registerScroller('insights', scroller), []);
+  const insets = useSafeAreaInsets();
   const { household } = useSession();
   const units = household?.units || 'metric';
   const tz = household?.timezone || 'UTC';
@@ -79,7 +81,11 @@ export default function Insights() {
     : 0;
 
   return (
-    <ScrollView ref={scroller} style={s.screen} contentContainerStyle={{ padding: space, paddingBottom: 48 }}>
+    <ScrollView
+      ref={scroller}
+      style={[s.screen, { marginTop: insets.top }]}
+      contentContainerStyle={{ padding: space, paddingTop: 8, paddingBottom: 48 }}
+    >
       <Segmented options={RANGES} selected={days} onPick={setDays} label={(n) => `${n}d`} />
 
       <OfflineBar stale={stale} onFlushed={load} />

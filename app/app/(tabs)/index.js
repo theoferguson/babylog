@@ -123,15 +123,15 @@ export default function Home() {
   return (
     <ScrollView
       ref={scroller}
-      style={s.screen}
-      contentContainerStyle={{ padding: space, paddingTop: insets.top + 8, paddingBottom: 40 }}
+      style={[s.screen, { marginTop: insets.top }]}
+      contentContainerStyle={{ padding: space, paddingTop: 8, paddingBottom: 40 }}
       refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={c.muted} />}
     >
       <View style={[s.row, { justifyContent: 'space-between' }]}>
         {babies.length > 1 ? (
           <View style={[s.row, { gap: 8 }]}>
             {babies.map((b) => (
-              <Pressable key={b.id} onPress={() => setBabyId(b.id)}>
+              <Pressable key={b.id} onPress={() => setBabyId(b.id)} hitSlop={8}>
                 <Text style={[s.h1, { color: b.id === babyId ? c.text : c.muted }]}>{b.name}</Text>
               </Pressable>
             ))}
@@ -140,10 +140,10 @@ export default function Home() {
           <Text style={s.h1}>{babies[0]?.name || 'babylog'}</Text>
         )}
         <View style={[s.row, { gap: 16 }]}>
-          <Pressable onPress={() => router.push('/import')} accessibilityRole="button">
+          <Pressable onPress={() => router.push('/import')} accessibilityRole="button" hitSlop={12}>
             <Text style={s.muted}>Import</Text>
           </Pressable>
-          <Pressable onPress={() => router.push('/settings')} accessibilityRole="button">
+          <Pressable onPress={() => router.push('/settings')} accessibilityRole="button" hitSlop={12}>
             <Text style={s.muted}>Settings</Text>
           </Pressable>
         </View>
@@ -197,7 +197,7 @@ export default function Home() {
             </Pressable>
           </View>
           <Pressable onPress={() => setView((v) => (v === 'timeline' ? 'list' : 'timeline'))}
-                     accessibilityRole="button">
+                     accessibilityRole="button" hitSlop={12}>
             <Text style={{ color: c.accent, fontWeight: '600' }}>
               {view === 'timeline' ? 'List' : 'Timeline'}
             </Text>

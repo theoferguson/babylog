@@ -291,7 +291,7 @@ export default function Nurse() {
     });
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
       <Text style={[s.h1, { textAlign: 'center' }]}>{clock(totalSecs)}</Text>
       <Text style={[s.muted, { textAlign: 'center' }]}>
         {checking

@@ -41,7 +41,7 @@ export default function InstantForm({ type, needsBaby = true, children, build, v
   const sameDay = (d) => d.toDateString() === new Date().toDateString();
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
       {children}
 
       <View style={{ gap: 8 }}>

@@ -96,7 +96,7 @@ export default function Review() {
   };
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14, paddingBottom: 40 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" style={s.screen} contentContainerStyle={{ padding: space, gap: 14, paddingBottom: 40 }}>
       <Text style={s.muted}>
         {rows.length
           ? 'Nothing is saved until you press the button.'

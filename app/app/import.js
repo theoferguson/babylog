@@ -110,18 +110,21 @@ export default function Import() {
           <Text style={s.muted}>{stats.seen} already imported — re-importing updates them.</Text>
         ) : null}
         <View style={[s.row, { gap: 16 }]}>
-          <Pressable onPress={() => setAll(!allOn)} accessibilityRole="button">
+          <Pressable onPress={() => setAll(!allOn)} accessibilityRole="button" hitSlop={12}>
             <Text style={{ color: c.accent, fontWeight: '600' }}>
               {allOn ? 'Deselect all' : 'Select all'}
             </Text>
           </Pressable>
-          <Pressable onPress={() => { setRows(null); setChecked({}); }} accessibilityRole="button">
+          <Pressable onPress={() => { setRows(null); setChecked({}); }} accessibilityRole="button"
+                     hitSlop={12}>
             <Text style={s.muted}>Choose a different file</Text>
           </Pressable>
         </View>
       </View>
 
       <FlatList
+        automaticallyAdjustKeyboardInsets
+        keyboardShouldPersistTaps="handled"
         data={rows}
         keyExtractor={(r) => r.id}
         initialNumToRender={20}

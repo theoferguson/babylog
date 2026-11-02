@@ -61,7 +61,7 @@ export default function Sleep() {
   });
 
   return (
-    <ScrollView style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
+    <ScrollView automaticallyAdjustKeyboardInsets keyboardShouldPersistTaps="handled" style={s.screen} contentContainerStyle={{ padding: space, gap: 14 }}>
       <View
         style={[s.card, {
           alignItems: 'center', paddingVertical: 40,

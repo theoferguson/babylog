@@ -98,6 +98,8 @@ export function Segmented({ options, selected, onPick, label, style }) {
           <Pressable
             key={l}
             onPress={() => onPick(o)}
+            // ~36pt tall; this reaches the 44pt minimum without changing the look.
+            hitSlop={4}
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
             style={{
