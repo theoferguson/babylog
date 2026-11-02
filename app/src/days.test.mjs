@@ -35,6 +35,13 @@ assert.equal(hourOffset(feed, NY), 20);
 assert.equal(hourOffset('2026-08-27T15:13:00-04:00', NY), 15 + 13 / 60);
 assert.equal(hourOffset('2026-08-27T00:00:00-04:00', NY), 0);
 
+// On DST days the axis follows the clock, not hours elapsed since midnight.
+assert.equal(hourOffset('2026-11-01T09:00:00-05:00', NY), 9);
+assert.equal(hourOffset('2026-11-01T23:30:00-05:00', NY), 23.5);
+assert.equal(hourOffset('2026-11-01T01:30:00-04:00', NY), 1.5);
+assert.equal(hourOffset('2026-11-01T01:30:00-05:00', NY), 1.5);
+assert.equal(hourOffset('2026-03-08T09:00:00-04:00', NY), 9);
+
 assert.equal(addDays('2026-08-31', 1), '2026-09-01');
 assert.equal(addDays('2026-01-01', -1), '2025-12-31');
 assert.equal(addDays('2028-02-28', 1), '2028-02-29'); // leap year

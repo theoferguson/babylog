@@ -59,12 +59,14 @@ export function addDays(key, n) {
 
 export const todayKey = (tz) => dayKey(new Date(), tz);
 
-// How far into its own local day an event sits, as hours. This is what places a
-// block on the 24h axis, and why the axis is correct on a travel day.
+// Local wall-clock time of an event, as hours. This is what places a block on
+// the 24h axis, and why the axis is correct on a travel day. Wall clock, not
+// elapsed time since midnight: on a DST day those differ by an hour, and the
+// axis is labelled in clock hours (the repeated fall-back hour simply overlaps).
 export function hourOffset(instant, tz) {
   const d = new Date(instant);
-  const start = startOfDay(dayKey(d, tz), tz);
-  return (d.getTime() - start.getTime()) / 3600000;
+  const wall = d.getTime() - offsetMs(d, tz);
+  return (wall - Date.parse(`${dayKey(d, tz)}T00:00:00Z`)) / 3600000;
 }
 
 export function label(key, tz) {
