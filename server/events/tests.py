@@ -1564,6 +1564,13 @@ class HouseholdWriteSurfaceTests(APITestCase):
         self.hh.refresh_from_db()
         self.assertEqual(self.hh.feed_interval_min, 150)
 
+    def test_the_feed_interval_can_be_left_to_the_app(self):
+        r = self.client.patch(f"/api/households/{self.hh.pk}/",
+                              {"feed_interval_min": None}, format="json")
+        self.assertEqual(r.status_code, 200, r.json())
+        self.hh.refresh_from_db()
+        self.assertIsNone(self.hh.feed_interval_min)
+
 
 class SleepTimerTests(APITestCase):
     """A sleep is a timer with no sides: start it, finish it, and it must not

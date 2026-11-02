@@ -17,7 +17,7 @@ import { eventPath } from '../../src/routes';
 import { c, space, styleFor } from '../../src/theme';
 import Timeline from '../../src/Timeline';
 import WeekView from '../../src/WeekView';
-import { ErrorNote, s } from '../../src/ui';
+import { ErrorNote, s, Segmented } from '../../src/ui';
 
 // Day and week views over the same data, with a month picker so reaching last
 // Tuesday is one tap rather than six.
@@ -125,21 +125,8 @@ export default function Calendar() {
       </View>
 
       <View style={[s.row, { gap: 8, marginTop: 10 }]}>
-        {[['day', 'Day'], ['week', 'Week'], ['list', 'List']].map(([v, label]) => (
-          <Pressable
-            key={v}
-            onPress={() => setMode(v)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: mode === v }}
-            style={{
-              paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999,
-              backgroundColor: mode === v ? c.accent : c.surface,
-              borderWidth: 1, borderColor: mode === v ? c.accent : c.border,
-            }}
-          >
-            <Text style={{ color: mode === v ? '#FFF' : c.text, fontWeight: '600' }}>{label}</Text>
-          </Pressable>
-        ))}
+        <Segmented options={['day', 'week', 'list']} selected={mode} onPick={setMode}
+                   label={(v) => v[0].toUpperCase() + v.slice(1)} />
         <View style={{ flex: 1 }} />
         <Pressable onPress={() => setDay(addDays(day, mode === 'week' ? -7 : -1))} hitSlop={10}
                    accessibilityRole="button" accessibilityLabel="Previous">

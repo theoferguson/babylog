@@ -12,8 +12,9 @@ import Rollup from '../../src/Rollup';
 import { flush } from '../../src/outbox';
 import { eventPath } from '../../src/routes';
 import { addDays, dayBounds, dayKey, label as dayLabel, todayKey } from '../../src/days';
-import { ago, clock, countdown, summarize, timeOfDay } from '../../src/format';
+import { ago, clock, countdown, gapLabel, summarize, timeOfDay } from '../../src/format';
 import { useSession } from '../../src/session';
+import { DEFAULT_FEED_MIN, learnedInterval } from '../../src/stats';
 import * as localTimer from '../../src/localTimer';
 import { c, space, styleFor, titleFor, types } from '../../src/theme';
 import Timeline from '../../src/Timeline';
@@ -36,6 +37,7 @@ export default function Home() {
   const [latest, setLatest] = useState({});
   const [events, setEvents] = useState([]);
   const [week, setWeek] = useState({});
+  const [learned, setLearned] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [stale, setStale] = useState(false);
@@ -63,7 +65,9 @@ export default function Home() {
       setLatest(l.data || {});
       setEvents(d.data.results || d.data || []);
       const counts = {};
-      for (const e of w.data.results || w.data || []) {
+      const weekEvents = w.data.results || w.data || [];
+      setLearned(learnedInterval(weekEvents));
+      for (const e of weekEvents) {
         const k = dayKey(e.started_at, e.tz || tz);
         counts[k] = (counts[k] || 0) + 1;
       }
@@ -145,7 +149,7 @@ export default function Home() {
         </View>
       </View>
 
-      <NextFeed last={latest.feed} intervalMin={household?.feed_interval_min} />
+      <NextFeed last={latest.feed} household={household} learned={learned} />
 
       {banners.map((b) => (
         <RunningBanner
@@ -219,7 +223,9 @@ export default function Home() {
 
 // When the next feed is expected. Measured from the last feed's START, so a
 // long nursing session does not push the next one out by its own length.
-function NextFeed({ last, intervalMin }) {
+// On Auto the gap is the baby's own recent median, falling back to the
+// household default until there are enough feeds to learn from.
+function NextFeed({ last, household, learned }) {
   // Its own slow tick: the shared one only runs while a timer does, and this
   // banner has to keep counting down on a screen left open.
   const [now, setNow] = useState(() => Date.now());
@@ -227,7 +233,14 @@ function NextFeed({ last, intervalMin }) {
     const id = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(id);
   }, []);
-  if (!last || !intervalMin) return null;
+  if (!last || !household) return null;
+  const auto = household.feed_interval_min == null;
+  const intervalMin = auto ? learned ?? DEFAULT_FEED_MIN : household.feed_interval_min;
+  const why = !auto
+    ? ' — change it in Settings.'
+    : learned
+      ? ', the typical gap over the last three days.'
+      : ', until there are enough recent feeds to learn the gap.';
   const due = new Date(new Date(last.started_at).getTime() + intervalMin * 60000);
   const overdue = due.getTime() <= now;
   return (
@@ -245,8 +258,7 @@ function NextFeed({ last, intervalMin }) {
         </Text>
       </View>
       <Text style={s.muted}>
-        {Math.round(intervalMin / 60 * 10) / 10}h after the last feed started — change it in
-        Settings.
+        {gapLabel(intervalMin)} after the last feed started{why}
       </Text>
     </View>
   );

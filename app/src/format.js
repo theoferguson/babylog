@@ -41,6 +41,12 @@ export function mins(secs) {
   return `${Math.round(secs / 60)}m`;
 }
 
+// A feed gap in minutes, as "2h 47m".
+export function gapLabel(min) {
+  const h = Math.floor(min / 60);
+  return h ? `${h}h ${Math.round(min % 60)}m` : `${Math.round(min)}m`;
+}
+
 export const timeOfDay = (iso) =>
   new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 

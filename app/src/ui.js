@@ -83,3 +83,33 @@ export function Chip({ style: t, children }) {
     </View>
   );
 }
+
+// A row of pills where exactly one is selected (InstantForm's `Choice` is the
+// clearable, tinted kind). Options can be any value; `label` names each one and
+// doubles as its identity, so array-valued options compare sanely.
+export function Segmented({ options, selected, onPick, label, style }) {
+  const sel = label(selected);
+  return (
+    <View style={[s.row, { gap: 8, flexWrap: 'wrap' }, style]}>
+      {options.map((o) => {
+        const l = label(o);
+        const on = l === sel;
+        return (
+          <Pressable
+            key={l}
+            onPress={() => onPick(o)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+            style={{
+              paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+              backgroundColor: on ? c.accent : c.surface,
+              borderWidth: 1, borderColor: on ? c.accent : c.border,
+            }}
+          >
+            <Text style={{ color: on ? '#FFF' : c.text, fontWeight: '600' }}>{l}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}

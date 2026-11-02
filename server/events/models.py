@@ -46,7 +46,8 @@ class Household(models.Model):
     timezone = models.CharField(max_length=64, default="America/New_York")
     # How long after a feed starts the next one is expected. Drives the
     # "next feed" banner only -- nothing is scheduled or enforced off it.
-    feed_interval_min = models.PositiveIntegerField(default=180)
+    # Null means learn it from the baby's own recent feeds, on the client.
+    feed_interval_min = models.PositiveIntegerField(default=180, null=True, blank=True)
     members = models.ManyToManyField(settings.AUTH_USER_MODEL, through="Membership")
     created_at = models.DateTimeField(auto_now_add=True)
 

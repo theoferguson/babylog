@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { byDay, dayStats, feedIntervals, isNight, median, summary } from './stats.js';
+import { byDay, dayStats, feedIntervals, isNight, learnedInterval, median, summary } from './stats.js';
 
 const NY = 'America/New_York';
 const feed = (iso, extra = {}) => ({ type: 'feed', started_at: iso, tz: NY, payload: { method: 'breast' }, ...extra });
@@ -60,6 +60,33 @@ assert.equal(sum.activeDays, 1);
 assert.equal(sum.avgFeeds, 2);
 assert.equal(sum.avgDiapers, 2);
 assert.equal(sum.totalPumpedMl, 100);
+
+assert.equal(sum.avgBottleMl, 100);
+assert.equal(sum.avgPees, 2);
+assert.equal(sum.avgPoos, 1);
+
+// Today is partial, so once a complete day exists it stays out of the averages.
+const twoDays = [
+  ...['02', '05', '08', '11', '14', '17', '20', '23'].map((h) => feed(`2026-08-27T${h}:00:00-04:00`)),
+  feed('2026-08-28T01:00:00-04:00'),
+];
+const partial = summary(twoDays, NY, 7, '2026-08-28');
+assert.equal(partial.activeDays, 2);
+assert.equal(partial.avgDays, 1);
+assert.equal(partial.avgFeeds, 8);
+
+// The night window is the viewer's to move, and may not wrap midnight.
+assert.equal(isNight(feed('2026-08-28T20:30:00-04:00'), NY, [21, 6]), false);
+assert.equal(isNight(feed('2026-08-28T05:30:00-04:00'), NY, [21, 6]), true);
+assert.equal(isNight(feed('2026-08-28T03:00:00-04:00'), NY, [0, 6]), true);
+assert.equal(isNight(feed('2026-08-28T23:00:00-04:00'), NY, [0, 6]), false);
+assert.equal(summary(twoDays, NY, 7, '2026-08-28', [21, 6]).nightFeeds, 4);
+
+// The learned gap uses only recent feeds, and needs enough of them to trust.
+const now = new Date('2026-08-28T02:00:00-04:00').getTime();
+assert.equal(learnedInterval(twoDays, now), 180);
+assert.equal(learnedInterval(twoDays, new Date('2026-08-31T12:00:00-04:00').getTime()), null);
+assert.equal(learnedInterval([feed('2026-08-20T01:00:00-04:00'), ...twoDays], now), 180);
 
 // A late-evening event in NY belongs to the NY day, not the UTC one.
 const lateNight = byDay([feed('2026-08-28T23:30:00-04:00')], NY, 2, '2026-08-28');

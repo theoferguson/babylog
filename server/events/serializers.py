@@ -110,7 +110,7 @@ class HouseholdSerializer(serializers.ModelSerializer):
     # Bounded so a typo cannot produce a banner that is never due, or one that
     # is permanently overdue.
     feed_interval_min = serializers.IntegerField(min_value=15, max_value=1440,
-                                                 required=False)
+                                                 required=False, allow_null=True)
 
     class Meta:
         model = Household

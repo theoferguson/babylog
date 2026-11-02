@@ -6,7 +6,7 @@ import { Babies, Invites, api } from '../src/api';
 import DateField from '../src/DateField';
 import { useSession } from '../src/session';
 import { c, space } from '../src/theme';
-import { Button, ErrorNote, s } from '../src/ui';
+import { Button, Segmented, ErrorNote, s } from '../src/ui';
 import { offsetLabel, zoneOptions } from '../src/zones';
 
 // Baby swatches, distinct from the event-type palette so a baby is never
@@ -137,28 +137,15 @@ function HouseholdCard({ household, busy, onSave }) {
       </Text>
 
       <Text style={s.body}>Expect a feed every</Text>
-      <View style={[s.row, { gap: 8, flexWrap: 'wrap' }]}>
-        {[90, 120, 150, 180, 210, 240].map((m) => (
-          <Pressable
-            key={m}
-            onPress={() => setGap(m)}
-            accessibilityRole="button"
-            accessibilityState={{ selected: gap === m }}
-            style={{
-              paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14,
-              backgroundColor: gap === m ? c.accent : c.surface,
-              borderWidth: 1, borderColor: gap === m ? c.accent : c.border,
-            }}
-          >
-            <Text style={{ color: gap === m ? '#FFF' : c.text, fontWeight: '600' }}>
-              {m % 60 ? `${(m / 60).toFixed(1)}h` : `${m / 60}h`}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <Segmented
+        options={[null, 90, 120, 150, 180, 210, 240]}
+        selected={gap}
+        onPick={setGap}
+        label={(m) => (m == null ? 'Auto' : `${m % 60 ? (m / 60).toFixed(1) : m / 60}h`)}
+      />
       <Text style={s.muted}>
-        Counted from when the last feed started, nursing or bottle. Shown as a banner on Home;
-        nothing is scheduled off it.
+        Counted from when the last feed started, nursing or bottle. Auto uses the typical gap
+        over the last three days. Shown as a banner on Home; nothing is scheduled off it.
       </Text>
 
       <Text style={s.body}>Home timezone</Text>
