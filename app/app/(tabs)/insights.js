@@ -48,17 +48,21 @@ export default function Insights() {
     AsyncStorage.setItem(NIGHT_KEY, nightLabel(n)).catch(() => { /* still applies this session */ });
   };
 
+  // Latest load wins: flicking 7d -> 30d -> 7d must not end on the 30d rows.
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     try {
       const end = todayKey(tz);
       const { since } = dayBounds(addDays(end, -(days - 1)), tz);
       const r = await cached(`insights:${days}`, () =>
         Events.list({ since: since.toISOString(), limit: 1000 }));
+      if (mine !== seq.current) return;
       setEvents(r.data.results || r.data || []);
       setStale(r.stale);
       setError(null);
     } catch (e) {
-      setError(e);
+      if (mine === seq.current) setError(e);
     }
   }, [days, tz]);
 

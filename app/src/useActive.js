@@ -18,11 +18,18 @@ export function useActiveEvents() {
   const poll = useCallback(async () => {
     try {
       const { events: rows, now } = await Events.active();
-      setEvents(rows || []);
+      // Same rows, same state: otherwise every 3s poll re-renders the whole
+      // screen (timeline and all) even though nothing changed.
+      const next = rows || [];
+      setEvents((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
       setLoaded(true);
       // Trust the server's clock for elapsed time; a phone whose clock drifts
-      // would otherwise render a different duration than its partner.
-      if (now) setSkewMs(new Date(now).getTime() - Date.now());
+      // would otherwise render a different duration than its partner. Network
+      // jitter moves this by a few ms per poll; only a real drift is worth a render.
+      if (now) {
+        const skew = new Date(now).getTime() - Date.now();
+        setSkewMs((prev) => (Math.abs(prev - skew) > 500 ? skew : prev));
+      }
       return rows || [];
     } catch {
       // Offline: keep showing the last known state, but stop blocking the UI --

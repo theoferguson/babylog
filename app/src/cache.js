@@ -22,14 +22,19 @@ export async function writeCache(key, value) {
   }
 }
 
+export const isAuthError = (e) => e?.status === 401 || e?.status === 403;
+
 // Fetch, falling back to cache when the network is gone. `stale` tells the UI
 // it is looking at old data so it can say so rather than quietly lying.
+// A refused token is not "the network is gone": serving the cache over it would
+// keep a revoked session looking signed in forever.
 export async function cached(key, fetcher) {
   try {
     const fresh = await fetcher();
     await writeCache(key, fresh);
     return { data: fresh, stale: false };
   } catch (e) {
+    if (isAuthError(e)) throw e;
     const fallback = await readCache(key);
     if (fallback == null) throw e;
     return { data: fallback, stale: true };

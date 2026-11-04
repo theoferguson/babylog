@@ -35,11 +35,20 @@ export default function Home() {
   const [day, setDay] = useState(() => todayKey(tz));
   const [view, setView] = useState('timeline');
   const [latest, setLatest] = useState({});
-  const [events, setEvents] = useState([]);
+  // Tagged with the day they belong to, so stepping to another day shows
+  // nothing until its rows arrive rather than the old day's under the new title.
+  const [dayRows, setDayRows] = useState({ day: null, rows: [] });
+  const events = dayRows.day === day ? dayRows.rows : [];
   const [week, setWeek] = useState({});
   const [learned, setLearned] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Only a real pull shows the spinner. Driving it from `busy` made iOS drop the
+  // whole page down and snap it back on every focus and every day change.
+  const [pulling, setPulling] = useState(false);
+  // Latest load wins: tapping through days fires overlapping loads, and an
+  // older one landing last would draw the wrong day.
+  const seq = useRef(0);
   const [stale, setStale] = useState(false);
   // A timer started with no connection lives only on this device, so the server
   // cannot report it. Without this it would be invisible here -- the moment you
@@ -47,6 +56,7 @@ export default function Home() {
   const [offlineTimer, setOfflineTimer] = useState(null);
 
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     setBusy(true);
     try {
       // Anything queued while offline goes up before we read, so the screen
@@ -62,8 +72,9 @@ export default function Home() {
           Events.list({ since: since.toISOString(), until: until.toISOString() })),
         cached('week', () => Events.list({ since: wk.since.toISOString(), limit: 500 })),
       ]);
+      if (mine !== seq.current) return;
       setLatest(l.data || {});
-      setEvents(d.data.results || d.data || []);
+      setDayRows({ day, rows: d.data.results || d.data || [] });
       const counts = {};
       const weekEvents = w.data.results || w.data || [];
       setLearned(learnedInterval(weekEvents));
@@ -75,11 +86,17 @@ export default function Home() {
       setStale(l.stale || d.stale || w.stale);
       setError(null);
     } catch (e) {
-      setError(e);
+      if (mine === seq.current) setError(e);
     } finally {
-      setBusy(false);
+      if (mine === seq.current) setBusy(false);
     }
   }, [day, tz]);
+
+  const pull = useCallback(async () => {
+    setPulling(true);
+    await load();
+    setPulling(false);
+  }, [load]);
 
   useFocusEffect(
     useCallback(() => {
@@ -97,8 +114,6 @@ export default function Home() {
       ? [{ key: 'local', state: offlineTimer, event: null, offline: true }]
       : []),
   ];
-  const anyRunning = banners.some((b) => b.state.running_since);
-  const now = useNow(anyRunning) + skewMs;
   const isToday = day === todayKey(tz);
 
   // Voice logging: parse, then hand the draft to the review screen. This
@@ -125,7 +140,7 @@ export default function Home() {
       ref={scroller}
       style={[s.screen, { marginTop: insets.top }]}
       contentContainerStyle={{ padding: space, paddingTop: 8, paddingBottom: 40 }}
-      refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={c.muted} />}
+      refreshControl={<RefreshControl refreshing={pulling} onRefresh={pull} tintColor={c.muted} />}
     >
       <View style={[s.row, { justifyContent: 'space-between' }]}>
         {babies.length > 1 ? (
@@ -158,7 +173,7 @@ export default function Home() {
           event={b.event}
           offline={b.offline}
           babyName={babies.length > 1 ? babies.find((x) => x.id === b.event?.baby)?.name : null}
-          now={now}
+          skewMs={skewMs}
           onPress={() => router.push(b.event ? eventPath(b.event) : '/nurse')}
         />
       ))}
@@ -311,7 +326,12 @@ function fromEvent(e) {
   };
 }
 
-function RunningBanner({ state, event, offline, babyName, now, onPress }) {
+// Owns its own 1s tick, so a running timer re-renders this card and not the
+// whole home screen (timeline included) every second.
+function RunningBanner({ state, event, offline, babyName, skewMs, onPress }) {
+  // Server skew corrects a server-issued running_since; a local timer's came
+  // from this phone's clock, so skew would shift it (same rule as nurse.js).
+  const now = useNow(!!state.running_since) + (offline ? 0 : skewMs);
   const t = event ? styleFor(event) : types.nurse;
   // Time the timer actually ran, matching the nurse screen.
   const live = state.running_since
