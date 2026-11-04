@@ -36,12 +36,17 @@ export default function Calendar() {
   const [events, setEvents] = useState([]);
   const [monthCounts, setMonthCounts] = useState({});
   const [busy, setBusy] = useState(false);
+  // Spinner only for a real pull; see the same note on Home.
+  const [pulling, setPulling] = useState(false);
+  // Latest load wins, so paging weeks quickly cannot land an older week last.
+  const seq = useRef(0);
   const [stale, setStale] = useState(false);
   const [error, setError] = useState(null);
 
   const week = useMemo(() => weekOf(day), [day]);
 
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     setBusy(true);
     try {
       // Fetch the whole week either way: the day view needs one day of it and
@@ -60,6 +65,7 @@ export default function Calendar() {
             limit: 2000,
           })),
       ]);
+      if (mine !== seq.current) return;
       setEvents(wk.data.results || wk.data || []);
       const counts = {};
       for (const e of wide.data.results || wide.data || []) {
@@ -70,11 +76,17 @@ export default function Calendar() {
       setStale(wk.stale || wide.stale);
       setError(null);
     } catch (e) {
-      setError(e);
+      if (mine === seq.current) setError(e);
     } finally {
-      setBusy(false);
+      if (mine === seq.current) setBusy(false);
     }
   }, [week, day, tz]);
+
+  const pull = useCallback(async () => {
+    setPulling(true);
+    await load();
+    setPulling(false);
+  }, [load]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -99,7 +111,7 @@ export default function Calendar() {
       ref={scroller}
       style={s.screen}
       contentContainerStyle={{ paddingBottom: 32 }}
-      refreshControl={<RefreshControl refreshing={busy} onRefresh={load} tintColor={c.muted} />}
+      refreshControl={<RefreshControl refreshing={pulling} onRefresh={pull} tintColor={c.muted} />}
       stickyHeaderIndices={[0]}
     >
       <View
